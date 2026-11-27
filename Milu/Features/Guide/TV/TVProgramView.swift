@@ -65,8 +65,6 @@ struct TVProgramView: View {
                     .padding(.top, 28)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 140)
-            .padding(.trailing, 140)
             .padding(.top, 50)
             .padding(.bottom, Self.bottomPadding)
         }

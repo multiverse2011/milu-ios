@@ -32,7 +32,6 @@ struct TVRecordingDetailView: View {
                 bodyText
             }
             .frame(width: 1300, alignment: .leading)
-            .padding(.leading, 140)
             .padding(.top, 110)
             .padding(.bottom, Self.bottomPadding)
             .frame(maxWidth: .infinity, alignment: .leading)

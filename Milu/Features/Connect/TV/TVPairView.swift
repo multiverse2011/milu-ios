@@ -43,8 +43,6 @@ struct TVPairView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.leading, 200)
-            .padding(.trailing, 200)
             .padding(.top, 200)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -55,7 +53,6 @@ struct TVPairView: View {
                 .padding(.bottom, 110)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(.container, edges: .horizontal)
         .onExitCommand { onBack?() }
         .onDisappear {
             // 画面を離れたら待ち受けを止める

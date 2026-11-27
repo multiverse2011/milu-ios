@@ -19,6 +19,7 @@ struct TVLiveDetailView: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 ScrollView(.vertical) {
                     content(now: context.date)
+                        // 映像の上に重ねていて安全域が効かないので、端の余白は残す
                         .padding(.horizontal, 140)
                         .padding(.top, 110)
                         .padding(.bottom, 120)
