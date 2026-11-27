@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// tvOS の録画のタブ (TV-Recordings・TV-RecordingsEmpty)。上に焦点の当たっている録画の大きな情報と背景、
-/// 下に日付ごとのカードの列。決定の長押しで詳細 (TV-RecordingDetail)。
+/// 下に日付ごとのカードの列。決定の長押しでメニューを出し、「詳細」で詳細 (TV-RecordingDetail)。
 struct TVRecordingsTabView: View {
     /// 録画がまだ無いときの「ライブへ」
     var onGoLive: () -> Void = {}
@@ -118,7 +118,7 @@ struct TVRecordingsTabView: View {
                     Text("録画")
                         .foregroundStyle(Color.accentColor)
                         .fontWeight(.semibold)
-                    Text("長押しで詳細 (説明・削除)")
+                    Text("長押しでメニューから詳細")
                     HStack(spacing: 8) {
                         Circle()
                             .fill(Color.accentColor)
@@ -186,7 +186,7 @@ struct TVRecordingsTabView: View {
     // MARK: - カード
 
     private func card(_ recording: Recording) -> some View {
-        // 浮き上がり・影は tvOS の標準のボタンと hoverEffect に任せ、決定で再生・長押しで詳細にする
+        // 浮き上がり・影は tvOS の標準のボタンと hoverEffect に任せ、決定で再生・長押しでメニューを出す
         return Button {
             open(recording, from: nil)
         } label: {
@@ -299,9 +299,6 @@ struct TVRecordingCard: View {
                     width: 510,
                     height: 287
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                // 浮き上がりと光沢は tvOS の標準の効果に任せる (純正の TV アプリの並び)
-                .hoverEffect(.highlight)
                 if recording {
                     Text("● 録画中")
                         .font(.system(size: 22, weight: .bold))
@@ -313,6 +310,9 @@ struct TVRecordingCard: View {
                 }
             }
             .frame(width: 510, height: 287)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            // 浮き上がりと光沢は tvOS の標準の効果に任せる (純正の TV アプリの並び)。札も絵と一緒に動かす
+            .hoverEffect(.highlight)
 
             // 番組名とメタ情報は絵の下 (純正の TV アプリの並べ方)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
