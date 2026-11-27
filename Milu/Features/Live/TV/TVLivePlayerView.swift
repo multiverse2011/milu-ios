@@ -15,6 +15,8 @@ struct TVLivePlayerView: View {
     /// メニューを開いたときのフォーカスの的 (上は局の列、下は操作の列)
     @State private var menuTarget: TVLiveFocus = .quality(0)
     @State private var showsHud = false
+    /// 長押しの決定を消費したか (番組情報が無く詳細を開けなかった局で、離した決定を一時停止に使わない)
+    @State private var longPressConsumed = false
     @State private var hudTask: Task<Void, Never>?
     @FocusState private var focus: TVLiveFocus?
 
@@ -32,7 +34,8 @@ struct TVLivePlayerView: View {
         }
         .ignoresSafeArea()
         // 再生/一時停止ボタン。決定と同じ入口を通す。Now Playing の経路からも同じ押下が届くことがあるので、
-        // 二重に動かないよう PlaybackSession で受け止める
+        // 二重に動かないよう PlaybackSession で受け止める。
+        // メニュー・詳細を開いている間も効かせる (純正と同じ。決定は overlay の間は効かせない)
         .onPlayPauseCommand {
             model.togglePlayPause()
         }
@@ -153,13 +156,18 @@ struct TVLivePlayerView: View {
         }
         // 決定で一時停止・再開 (再開はその時点のライブ)。メニューは下・上で開く (3.5.1)
         .onTapGesture {
+            // 長押しで詳細を開けなかった局では、離したときの決定を消費する
+            guard !longPressConsumed else {
+                longPressConsumed = false
+                return
+            }
             guard overlay == .none else { return }
             model.togglePlayPause()
         }
-        // 決定の長押しで番組の詳細 (3.5.1)。離したときの決定は、詳細を開いた時点で受け止める
+        // 決定の長押しで番組の詳細 (3.5.1)。詳細を開けたときの離した決定は overlay で受け止める
         .onLongPressGesture(minimumDuration: 0.6) {
             guard overlay == .none else { return }
-            openDetail()
+            longPressConsumed = !openDetail()
         }
         .defaultFocus($focus, .video)
     }
@@ -220,9 +228,11 @@ struct TVLivePlayerView: View {
         overlay = .menu
     }
 
-    private func openDetail() {
-        guard model.current?.now != nil else { return }
+    @discardableResult
+    private func openDetail() -> Bool {
+        guard model.current?.now != nil else { return false }
         overlay = .detail
+        return true
     }
 
     private func closeOverlay() {

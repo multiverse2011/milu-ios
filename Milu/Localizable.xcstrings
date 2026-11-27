@@ -1299,6 +1299,16 @@
         }
       }
     },
+    "一時停止中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paused"
+          }
+        }
+      }
+    },
     "一覧に戻る" : {
       "localizations" : {
         "en" : {

@@ -77,7 +77,7 @@ import Testing
         #expect(session.stop == nil)
     }
 
-    @Test func nowPlayingUpdatesAndRemoteCommandsPauseAndResumeLive() {
+    @Test func nowPlayingUpdatesAndRemoteCommandsPauseAndResumeLive() async {
         let backend = SpyNowPlayingBackend()
         let nowPlaying = NowPlayingController(backend: backend)
         let session = makeSession(nowPlaying: nowPlaying)
@@ -108,6 +108,8 @@ import Testing
         #expect(session.phase == .paused)
         #expect(backend.info?.title == "あさイチ")
 
+        // 押し直しは同じ押下ではない。控えの窓 (0.4 秒) より間をあける
+        try? await Task.sleep(for: .milliseconds(450))
         #expect(nowPlaying.handlePlay())
         #expect(session.phase == .loading)
         #expect(backend.info?.rate == 1)
@@ -115,6 +117,34 @@ import Testing
         session.close()
         #expect(backend.info == nil)
         #expect(!backend.commandsEnabled)
+    }
+
+    /// 同じ押下が Now Playing の pause で先に届き、続けて決定 (toggle) で来ても動かない
+    @Test func pauseCommandThenSelectIsTheSamePress() {
+        let backend = SpyNowPlayingBackend()
+        let nowPlaying = NowPlayingController(backend: backend)
+        let session = makeSession(nowPlaying: nowPlaying)
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 1,
+            timeline: 1,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation
+        ))
+        #expect(session.phase == .playing)
+
+        // 押下は Now Playing の pause で先に届く
+        #expect(nowPlaying.handlePause())
+        #expect(session.phase == .paused)
+
+        // 同じ押下が決定として届いても、止まったまま
+        let pressed = Date()
+        #expect(session.togglePlayPause(now: pressed.addingTimeInterval(0.1)))
+        #expect(session.phase == .paused)
     }
 
     /// 決定・再生/一時停止ボタンと Now Playing の toggle。同じ押下が 2 度届いても 1 度だけ動き、
@@ -138,8 +168,9 @@ import Testing
         #expect(session.togglePlayPause(now: pressed))
         #expect(session.phase == .paused)
 
-        // 同じ押下がもう 1 つの経路から届いても、止まったまま
-        #expect(!session.togglePlayPause(now: pressed.addingTimeInterval(0.1)))
+        // 同じ押下がもう 1 つの経路から届いても、止まったまま。
+        // 捨てた押下も「扱った」として true を返す (Now Playing に失敗を返さない)
+        #expect(session.togglePlayPause(now: pressed.addingTimeInterval(0.1)))
         #expect(session.phase == .paused)
 
         // 間をあけた押下で再開する (接続を開き直すので .loading から)
@@ -594,7 +625,8 @@ import Testing
         #expect(session.phase == .paused)
         #expect(session.selectedRung == 2)
         #expect(defaults.integer(forKey: "liveRung") == 2)
-        session.play()
+        // 押し直しは同じ押下ではない。控えの窓 (0.4 秒) より間をあける
+        session.play(now: Date().addingTimeInterval(1))
         #expect(rungParam(session.currentStreamURL) == "2")
         session.close()
     }
@@ -668,7 +700,8 @@ import Testing
         trial.onReady?("h264", "2")
         await settle()
         #expect(session.phase == .paused)
-        session.play()
+        // 押し直しは同じ押下ではない。控えの窓 (0.4 秒) より間をあける
+        session.play(now: Date().addingTimeInterval(1))
         #expect(rungParam(session.currentStreamURL) == "2")
         session.close()
     }

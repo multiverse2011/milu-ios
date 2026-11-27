@@ -326,9 +326,42 @@ final class PlaybackSession {
         pictureInPicture?.stop()
     }
 
+    /// 決定・再生/一時停止ボタンと Now Playing の play/pause/toggle は、同じ押下ならここへ 2 度来る。
+    /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
     @discardableResult
-    func play() -> Bool {
+    func play(now: Date = Date()) -> Bool {
         guard service != nil, !closed, stop == nil else { return false }
+        guard claimPress(now) else { return true }
+        return resume()
+    }
+
+    /// ライブにはタイムシフトが無い (D17) ので、一時停止で接続を閉じてチューナーを空ける。
+    @discardableResult
+    func pause(now: Date = Date()) -> Bool {
+        guard service != nil, !closed, stop == nil else { return false }
+        guard claimPress(now) else { return true }
+        return suspend()
+    }
+
+    @discardableResult
+    func togglePlayPause(now: Date = Date()) -> Bool {
+        guard service != nil, !closed, stop == nil else { return false }
+        guard claimPress(now) else { return true }
+        if phase == .paused {
+            return resume()
+        }
+        return suspend()
+    }
+
+    /// 押下を控える。窓の外なら控えて true、2 度目なら false。
+    /// 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
+    private func claimPress(_ now: Date) -> Bool {
+        guard now.timeIntervalSince(lastToggleAt) >= Self.toggleWindow else { return false }
+        lastToggleAt = now
+        return true
+    }
+
+    private func resume() -> Bool {
         if phase == .paused {
             startStream(resetPolicy: true)
             publishNowPlaying(isPlaying: true)
@@ -337,10 +370,7 @@ final class PlaybackSession {
         return true
     }
 
-    /// ライブにはタイムシフトが無い (D17) ので、一時停止で接続を閉じてチューナーを空ける。
-    @discardableResult
-    func pause() -> Bool {
-        guard service != nil, !closed, stop == nil else { return false }
+    private func suspend() -> Bool {
         guard phase == .playing || phase == .loading || phase == .reconnecting else {
             return phase == .paused
         }
@@ -369,18 +399,6 @@ final class PlaybackSession {
         publishNowPlaying(isPlaying: false)
         pictureInPicture?.invalidatePlaybackState()
         return true
-    }
-
-    /// 決定・再生/一時停止ボタンと Now Playing の toggle が同じ押下としてここへ来る。
-    /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
-    @discardableResult
-    func togglePlayPause(now: Date = Date()) -> Bool {
-        guard now.timeIntervalSince(lastToggleAt) >= Self.toggleWindow else { return false }
-        lastToggleAt = now
-        if phase == .paused {
-            return play()
-        }
-        return pause()
     }
 
     private func publishNowPlaying(isPlaying: Bool) {

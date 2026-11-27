@@ -121,6 +121,7 @@ struct LocalizationTests {
             // ライブ (TV-Live・TV-LiveHud・TV-LiveTuning・TV-LiveDetail)
             "Apple TV",
             "選局しています",
+            "一時停止中",
             "視聴中",
             "字幕 オン",
             "字幕 オフ",
