@@ -678,18 +678,18 @@ private struct TVGuideBoard: View {
     }
 }
 
-/// 決定の当たり。番組の無い列は当たりを付けない (決定しても開くものが無い)。
-/// 再生の面と同じく `.onTapGesture` で受ける (実機の決定で動いている書き方)
+/// 決定の当たり。番組の無い列は何もしない (決定しても開くものが無い)。
+/// 再生の面と同じく `.onTapGesture` で受ける (実機の決定で動いている書き方)。
+/// 当たりを条件で付け分けると、番組の有無が変わったときに的のビューが作り直されて
+/// 焦点が落ちるので、いつも付け、空列は中で返す
 private struct FocusTap: ViewModifier {
     let enabled: Bool
     let action: () -> Void
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if enabled {
-            content.onTapGesture(perform: action)
-        } else {
-            content
+        content.onTapGesture {
+            guard enabled else { return }
+            action()
         }
     }
 }
