@@ -459,7 +459,7 @@ private struct TVGuideCell: View {
                         .frame(width: 11, height: 11)
                         .padding(.top, 11)
                     title
-                        // マスの高さ (1 分 4.6pt) から入る行数で行を切るので、字はテキストスタイルの段に置いたまま固定する
+                        // マスの高さ (1 分 4.6pt) から入る行数で行を切るので、題は .callout の段に留める
                         .font(DenpaFont.font(.callout))
                         .foregroundStyle(.primary)
                         .lineLimit(lines.title)
