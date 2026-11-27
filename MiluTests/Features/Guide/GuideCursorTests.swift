@@ -142,6 +142,16 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.horizontal(GuideCursor(column: 1, programID: 4, anchor: 10 * 3_600_000), in: list, by: 0) == nil)
     }
 
+    @Test func isUsableTellsColumnsThatCanTakeFocus() {
+        var list = services
+        list.append(service(3, []))
+        #expect(GuideCursorMotion.isUsable(0, in: list))
+        // 番組が無い列、範囲の外は焦点を置けない
+        #expect(!GuideCursorMotion.isUsable(2, in: list))
+        #expect(!GuideCursorMotion.isUsable(-1, in: list))
+        #expect(!GuideCursorMotion.isUsable(9, in: list))
+    }
+
     @Test func staleCursorIsNotFound() {
         #expect(GuideCursorMotion.program(GuideCursor(column: 0, programID: 99, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.program(GuideCursor(column: 9, programID: 1, anchor: 0), in: services) == nil)

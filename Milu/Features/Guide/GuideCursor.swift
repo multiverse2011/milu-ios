@@ -67,10 +67,15 @@ nonisolated enum GuideCursorMotion {
     static func adjacentColumn(from column: Int, in services: [GuideService], by delta: Int) -> Int? {
         guard delta != 0 else { return nil }
         var next = column + delta
-        while services.indices.contains(next), services[next].programs.isEmpty {
+        while services.indices.contains(next), !isUsable(next, in: services) {
             next += delta
         }
-        return services.indices.contains(next) ? next : nil
+        return isUsable(next, in: services) ? next : nil
+    }
+
+    /// 焦点を置ける列か (列があり、番組が 1 つ以上ある)。
+    static func isUsable(_ column: Int, in services: [GuideService]) -> Bool {
+        services.indices.contains(column) && !services[column].programs.isEmpty
     }
 
     /// その時刻に入っている番組。無ければ、その時刻までで最後に始まった番組 (それも無ければ先頭)。

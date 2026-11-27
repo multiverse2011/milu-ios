@@ -108,10 +108,10 @@ private struct TVGuideBoard: View {
         // 読み直しで局が減ると表の幅が縮む。古い送り位置のままだと全部が画面の外に出る
         .onChange(of: guide.services.count) { _, _ in
             scroll = CGPoint(x: clampX(scroll.x), y: scroll.y)
-            // 局が減って焦点の列が消えると、的が無くなって格子が無反応になる。居られる列へ移す
-            if case .column(let column) = focus, column >= guide.services.count {
-                focus = resolvedCursor(now: Date()).map { .column($0.column) }
-            }
+        }
+        // 読み直しで焦点の列が使えなくなったら (番組が消えた・局が減った)、居られる列へ移す
+        .onChange(of: guide.services) { _, _ in
+            repairFocus(now: Date())
         }
         // 焦点が列に移ったら、基準の時刻でその列の番組を選ぶ。左右の移動はこれだけで決める
         .onChange(of: focus) { _, new in
@@ -255,13 +255,14 @@ private struct TVGuideBoard: View {
                 Color.clear
                     .frame(width: GuideLayout.tvColumnWidth, height: size.height)
                     .contentShape(Rectangle())
-                    // 焦点が当たっている列は、読み直しで番組が消えても的を残す
-                    // (的が無くなると focus が nil になり、格子がどの押下にも応えなくなる)
+                    // 焦点が当たっている列は、読み直しで番組が消えても的を残す。的が無くなると
+                    // focus が nil になり、格子がどの押下にも応えなくなる (repairFocus が移すまでの間)
                     .focusable(usable || focus == .column(column))
                     .focusEffectDisabled()
                     .focused($focus, equals: .column(column))
                     .onMoveCommand { move($0) }
-                    .onTapGesture { open(column: column, now: now) }
+                    // 番組の無い列はタップの当たりも付けない (決定しても開くものが無い)
+                    .gesture(TapGesture().onEnded { open(column: column, now: now) }, including: usable ? .all : .none)
                     // 列は 1 つのまとまりなので、読み上げはその列で選んでいる番組だけにする
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(cursorLabel(column: column, now: now))
@@ -365,6 +366,22 @@ private struct TVGuideBoard: View {
         return GuideCursorMotion.initial(in: guide.services, now: time)
     }
 
+    /// 読み直しで焦点の列が使えなくなったら、居られる列へ移す。焦点の的が無い列に留まると
+    /// cursor と食い違って格子が無反応になる。送り先の的ができてから焦点を渡すため、
+    /// cursor と送りをそろえてから focus を代入する
+    private func repairFocus(now: Date) {
+        guard case .column(let column) = focus,
+              !GuideCursorMotion.isUsable(column, in: guide.services)
+        else { return }
+        guard let target = resolvedCursor(now: now) else {
+            focus = nil
+            return
+        }
+        cursor = target
+        follow(target)
+        focus = .column(target.column)
+    }
+
     // MARK: 作る範囲
 
     private func columnStep() -> Double {
@@ -404,8 +421,10 @@ private struct TVGuideBoard: View {
 
     /// 上下だけを持つ。左右は tvOS の焦点の仕組み (列ごとの的) が動かし、青枠は焦点の移りで決める
     private func move(_ direction: MoveCommandDirection) {
+        // 焦点が既にチップなどへ抜けていれば、見えないカーソルを動かさない
         guard direction == .up || direction == .down,
-              let current = resolvedCursor(now: Date())
+              let current = resolvedCursor(now: Date()),
+              focus == .column(current.column)
         else { return }
         if let next = GuideCursorMotion.vertical(current, in: guide.services, by: direction == .up ? -1 : 1) {
             cursor = next
