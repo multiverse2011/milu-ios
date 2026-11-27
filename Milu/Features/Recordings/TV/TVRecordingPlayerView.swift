@@ -61,8 +61,12 @@ struct TVRecordingPlayerView: View {
         .task { await session.start() }
         // 開いた直後の焦点は映像の面に置く (純正と同じ)。開いた 1 回だけ当てる。
         // defaultFocus は焦点が外れたとき (操作の列やメニューへ移ったとき) にも既定を当て直そうとし、
-        // 面が操作の列を出している間も focusable なままなので、札やメニューから焦点を奪う
-        .onAppear { surfaceFocused = true }
+        // 面が操作の列を出している間も focusable なままなので、札やメニューから焦点を奪う。
+        // onAppear は焦点の仕組みより先に走ることがあるので、1 度譲ってから当てる
+        .task {
+            await Task.yield()
+            surfaceFocused = true
+        }
         .onDisappear {
             hideTask?.cancel()
             focusTask?.cancel()

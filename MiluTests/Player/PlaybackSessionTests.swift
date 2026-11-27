@@ -51,15 +51,16 @@ import Testing
 
     private func makeService(
         programTitle: String = "ニュース",
-        audios: [AudioTrack] = []
+        audios: [AudioTrack] = [],
+        id: Int64 = 101
     ) -> Service {
         Service(
-            id: 101,
+            id: id,
             type: .GR,
             name: "NHK総合",
             remoteControlKey: 1,
             logo: nil,
-            live: "/api/services/101/live",
+            live: "/api/services/\(id)/live",
             airing: true,
             video: true,
             now: CurrentProgram(
@@ -254,6 +255,54 @@ import Testing
         #expect(session.play())
         #expect(session.phase == .loading)
         #expect(session.hasCaptions)
+    }
+
+    /// 一時停止中に局が差し替わったら、前の局の字幕のボタンは引き継がない
+    @Test func resumeAfterServiceChangeDropsTheCaptionsButton() {
+        let clock = Box(Date())
+        let session = makeSession(clock: { clock.value })
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 1,
+            timeline: 1,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation
+        ))
+        session.handleCaption(CaptionFrame(timestamp90kHz: 45_000, content: .page(captionPage())))
+        #expect(session.hasCaptions)
+
+        #expect(session.pause())
+        // 観ていた局が休止になり、一覧の更新で別の局の情報に差し替わる
+        session.updateService(makeService(id: 102))
+        clock.value = clock.value.addingTimeInterval(1)
+        #expect(session.play())
+        #expect(!session.hasCaptions)
+    }
+
+    /// 止まった画面では、最後の字幕を残さない (黒い幕の下に残さない)
+    @Test func stopClearsTheCaptionPage() {
+        let session = makeSession(startLoader: { _ in })
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 1,
+            timeline: 1,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation
+        ))
+        session.handleCaption(CaptionFrame(timestamp90kHz: 45_000, content: .page(captionPage())))
+        #expect(session.captionPage != nil)
+
+        for _ in 0..<4 { session.handleFailure(busy) }
+        #expect(session.stop?.reason == .serverBusy)
+        #expect(session.captionPage == nil)
     }
 
     @Test func videoFailureInBackgroundDoesNotStopPlayback() {

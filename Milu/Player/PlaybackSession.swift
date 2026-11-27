@@ -61,6 +61,8 @@ final class PlaybackSession {
     private var renderer: MediaRenderer?
     private var loader: StreamLoader?
     private var captionSource: CaptionSource?
+    /// 一時停止したときの局。再開で字幕のボタンを引き継ぐかの判断に使う
+    private var pausedServiceID: Int64?
     private var captionTimeline = CaptionTimeline()
     /// 映像の応答が返した段。字幕も同じ段を渡して、同じストリームを共有する
     private var rung: String?
@@ -370,11 +372,13 @@ final class PlaybackSession {
 
     private func resume() -> Bool {
         if phase == .paused {
-            // 同じ局の続き。字幕のある局なら、次の 1 枚が届く数秒も字幕のボタンを出しておく
-            // (局を替えたとき・open() は今までどおり落とす)
+            // 止めたときと同じ局の続きなら、次の 1 枚が届く数秒も字幕のボタンを出しておく。
+            // 止めている間に局が差し替わった (休止になった) ときは今までどおり落とす
+            let sameService = pausedServiceID == service?.id
             let hadCaptions = hasCaptions
+            pausedServiceID = nil
             startStream(resetPolicy: true)
-            hasCaptions = hadCaptions
+            hasCaptions = sameService && hadCaptions
             publishNowPlaying(isPlaying: true)
             pictureInPicture?.invalidatePlaybackState()
         }
@@ -385,6 +389,8 @@ final class PlaybackSession {
         guard phase == .playing || phase == .loading || phase == .reconnecting else {
             return phase == .paused
         }
+        // 再開で字幕のボタンを引き継いでよいのは、この局の続きに戻るときだけ
+        pausedServiceID = service?.id
         // 試している間に一時停止したら、試しは捨てて選んだ段をその場で確定・保存する
         // (接続の無い一時停止中に選んだときと同じ。再開でその段で開く)
         if trialLoader != nil {
@@ -622,6 +628,11 @@ final class PlaybackSession {
         loader = nil
         captionSource?.stop()
         captionSource = nil
+        // 止まった画面 (黒い幕) の下に、前の最後の 1 枚を残さない (close・startStream と同じ片付け)
+        captionTimeline = CaptionTimeline()
+        captionPage = nil
+        captionQueue = []
+        shownCaptionTime = nil
         renderer?.stop()
         nowPlaying.clear(owner: nowPlayingID)
         UIApplication.shared.isIdleTimerDisabled = false
