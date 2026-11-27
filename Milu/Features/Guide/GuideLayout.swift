@@ -188,6 +188,32 @@ nonisolated enum GuideLayout {
         return (Int64(start.timeIntervalSince1970 * 1000), Int64(end.timeIntervalSince1970 * 1000))
     }
 
+    /// tvOS の番組表で持つ放送日。カーソルの日の前後 1 日ずつで、`first`〜`last` (チップに出る日) の外は取らない
+    static func tvWindowDays(
+        center: Date,
+        first: Date,
+        last: Date,
+        calendar: Calendar = GuideLayout.calendar
+    ) -> [Date] {
+        let day = broadcastDay(for: center, calendar: calendar)
+        let start = max(first, calendar.date(byAdding: .day, value: -1, to: day) ?? day)
+        let end = min(last, calendar.date(byAdding: .day, value: 1, to: day) ?? day)
+        guard start <= end else { return [] }
+        var days: [Date] = []
+        var next = start
+        while next <= end {
+            days.append(next)
+            guard let after = calendar.date(byAdding: .day, value: 1, to: next) else { break }
+            next = after
+        }
+        return days
+    }
+
+    /// 時刻の列に出す日の見出し。「11/29」
+    static func dayHeading(for day: Date, calendar: Calendar = GuideLayout.calendar) -> String {
+        "\(calendar.component(.month, from: day))/\(calendar.component(.day, from: day))"
+    }
+
     /// 日付のメニューに並べる日。今日から 8 日ぶんで、`until` より先の日は並べない (番組表が無ければ `nil`)
     static func menuDays(now: Date, until: Int64?, calendar: Calendar = GuideLayout.calendar) -> [Date] {
         let today = broadcastDay(for: now, calendar: calendar)

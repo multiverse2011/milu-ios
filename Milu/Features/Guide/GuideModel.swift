@@ -51,6 +51,20 @@ final class GuideModel: ProgramSheetModel {
     /// 一覧を取れなかった (3.5 の「繋がらない」)
     private(set) var didFail = false
 
+    // MARK: tvOS の窓 (TV-Guide)。1 日ずつ読んで、1 つの表につなぐ
+
+    /// 表の始まりの放送日。開いたときに決め、セッション中は動かさない (送りの座標がずれないように)
+    private(set) var tvBase: Date?
+    /// いま持っている放送日 (昇順・連続)
+    private(set) var tvDays: [Date] = []
+    private(set) var tvGuide: GuideResponse?
+    private(set) var tvDidFail = false
+    private var tvResponses: [Int64: GuideResponse] = [:]
+    private var tvGeneration = 0
+    /// 最後に読みにいったカーソルの放送日 (SSE の読み直しに使う)
+    private var tvCenter: Date?
+    private var isTVGuide = false
+
     init(app: AppModel, now: Date = Date()) {
         self.app = app
         selectedDay = GuideLayout.broadcastDay(for: now)
@@ -65,7 +79,7 @@ final class GuideModel: ProgramSheetModel {
             },
             app.addReconnectListener { [weak self] in
                 guard let self else { return }
-                Task { await self.reload() }
+                Task { await self.refresh() }
             },
         ]
     }
@@ -78,20 +92,35 @@ final class GuideModel: ProgramSheetModel {
     private func handle(_ event: SSEEvent) {
         switch event.event {
         case "programs", "reservations", "recordings":
-            Task { await reload() }
+            Task { await refresh() }
         default:
             break
         }
     }
 
+    /// 読み直し。tvOS は窓を、iOS は 1 日を読む
+    private func refresh() async {
+        if isTVGuide {
+            await tvReload(center: tvCenter ?? selectedDay, force: true)
+        } else {
+            await reload()
+        }
+    }
+
     /// 日付のメニューに並べる日。今日から 8 日ぶんで、until より先は並べない (3.5)
     var menuDays: [Date] {
-        GuideLayout.menuDays(now: Date(), until: guide?.until)
+        GuideLayout.menuDays(now: Date(), until: isTVGuide ? tvGuide?.until : guide?.until)
     }
+
+    /// 表の先頭 (UNIX ミリ秒)。セッション中は動かさない
+    var tvFrom: Int64 { GuideLayout.broadcastRange(for: tvBase ?? selectedDay).from }
+    /// 表の末尾。持っている最後の日の翌 4:00
+    var tvTo: Int64 { GuideLayout.broadcastRange(for: tvDays.last ?? tvBase ?? selectedDay).to }
 
     /// いま開いている範囲の番組 (シートの中身の最新)
     func program(id: Int64) -> GuideProgramItem? {
-        guide?.services.lazy.flatMap { service in
+        let source = isTVGuide ? tvGuide : guide
+        return source?.services.lazy.flatMap { service in
             service.programs.map { GuideProgramItem(service: service, program: $0) }
         }.first { $0.id == id }
     }
@@ -115,18 +144,7 @@ final class GuideModel: ProgramSheetModel {
         isLoading = true
         didFail = false
         do {
-            if !didLoadTypes {
-                let data = try await app.get("api/services")
-                let services = try JSONDecoder().decodeArrayDroppingUnknowns([Service].self, from: data)
-                let types = ServiceType.allCases.filter { type in
-                    services.contains { $0.type == type }
-                }
-                availableTypes = types.isEmpty ? ServiceType.allCases : types
-                didLoadTypes = true
-                if !availableTypes.contains(selectedType), let first = availableTypes.first {
-                    selectedType = first
-                }
-            }
+            try await loadTypesIfNeeded()
             let range = GuideLayout.broadcastRange(for: selectedDay)
             let path = "api/programs?type=\(selectedType.rawValue)&from=\(range.from)&to=\(range.to)"
             let data = try await app.get(path)
@@ -138,6 +156,124 @@ final class GuideModel: ProgramSheetModel {
             didFail = true
         }
         isLoading = false
+    }
+
+    private func loadTypesIfNeeded() async throws {
+        guard !didLoadTypes else { return }
+        let data = try await app.get("api/services")
+        let services = try JSONDecoder().decodeArrayDroppingUnknowns([Service].self, from: data)
+        let types = ServiceType.allCases.filter { type in
+            services.contains { $0.type == type }
+        }
+        availableTypes = types.isEmpty ? ServiceType.allCases : types
+        didLoadTypes = true
+        if !availableTypes.contains(selectedType), let first = availableTypes.first {
+            selectedType = first
+        }
+    }
+
+    // MARK: tvOS の窓 (TV-Guide)
+
+    /// tvOS の番組表を開く。窓はカーソルの日の前後 1 日ずつ
+    func tvStart(now: Date = Date()) async {
+        isTVGuide = true
+        let day = GuideLayout.broadcastDay(for: now)
+        if tvBase == nil { tvBase = day }
+        await tvReload(center: tvCenter ?? day)
+    }
+
+    /// 種別を切り替える。窓は TV 側が読み直す。新しい表が来るまでは今の表を出しておく
+    func tvSelectType(_ type: ServiceType) {
+        guard type != selectedType else { return }
+        selectedType = type
+        tvResponses = [:]
+        // 読み込み中の旧い種別の応答を捨てる
+        tvGeneration += 1
+    }
+
+    /// カーソルの日の前後 1 日ずつ (チップに出る日の範囲まで) を読み、1 つの表につなぐ。
+    /// 持っていない日だけ読む (`force` なら持っている日も読み直す)。1 日失敗しても、
+    /// 他の日と今ある範囲はそのまま使う (足りない日は次の読みで取り直す)
+    func tvReload(center: Date, force: Bool = false) async {
+        tvGeneration += 1
+        let generation = tvGeneration
+        isTVGuide = true
+        if tvBase == nil { tvBase = GuideLayout.broadcastDay(for: center) }
+        tvCenter = center
+        do {
+            try await loadTypesIfNeeded()
+        } catch {
+            guard generation == tvGeneration else { return }
+            tvDidFail = true
+            return
+        }
+        guard generation == tvGeneration, let base = tvBase else { return }
+        let last = GuideLayout.menuDays(now: Date(), until: tvGuide?.until).last ?? base
+        let days = GuideLayout.tvWindowDays(center: center, first: base, last: last)
+        guard !days.isEmpty else { return }
+        var failed = false
+        for day in days {
+            let key = GuideLayout.broadcastRange(for: day).from
+            if !force, tvResponses[key] != nil { continue }
+            do {
+                let range = GuideLayout.broadcastRange(for: day)
+                let path = "api/programs?type=\(selectedType.rawValue)&from=\(range.from)&to=\(range.to)"
+                let data = try await app.get(path)
+                let decoded = try JSONDecoder().decode(GuideResponse.self, from: data)
+                guard generation == tvGeneration else { return }
+                tvResponses[key] = decoded
+            } catch {
+                guard generation == tvGeneration else { return }
+                failed = true
+            }
+        }
+        guard generation == tvGeneration else { return }
+        let keys = Set(days.map { GuideLayout.broadcastRange(for: $0).from })
+        tvResponses = tvResponses.filter { keys.contains($0.key) }
+        // 途中に読めなかった日があれば、そこまでをつなぐ (間に空白を挟まない)
+        let loaded = days.drop { tvResponses[key($0)] == nil }.prefix { tvResponses[key($0)] != nil }
+        tvDays = Array(loaded)
+        tvGuide = tvDays.isEmpty ? nil : Self.merge(tvDays.compactMap { tvResponses[key($0)] })
+        tvDidFail = failed && tvGuide == nil
+    }
+
+    private func key(_ day: Date) -> Int64 {
+        GuideLayout.broadcastRange(for: day).from
+    }
+
+    /// 放送日の読みを 1 つの表につなぐ。局は id で寄せ、番組は id で重複を落として始まり順に並べる
+    nonisolated static func merge(_ responses: [GuideResponse]) -> GuideResponse? {
+        let responses = responses.sorted { $0.from < $1.from }
+        guard let first = responses.first, let last = responses.last else { return nil }
+        var services: [Int64: GuideService] = [:]
+        var order: [Int64] = []
+        var programs: [Int64: [Int64: GuideProgram]] = [:]
+        for response in responses {
+            for service in response.services {
+                if services.index(forKey: service.id) == nil {
+                    services[service.id] = service
+                    order.append(service.id)
+                    programs[service.id] = [:]
+                }
+                for program in service.programs {
+                    programs[service.id]?[program.id] = program
+                }
+            }
+        }
+        let merged = order.compactMap { id -> GuideService? in
+            guard var service = services[id] else { return nil }
+            service.programs = (programs[id] ?? [:]).values.sorted {
+                $0.startAt == $1.startAt ? $0.id < $1.id : $0.startAt < $1.startAt
+            }
+            return service
+        }
+        return GuideResponse(
+            type: first.type,
+            from: first.from,
+            to: last.to,
+            until: responses.compactMap(\.until).max(),
+            services: merged
+        )
     }
 
     /// 番組の中身。終わった番組は 404 なので、そのときはマスの持つ分だけを出す (3.5)
@@ -156,11 +292,11 @@ final class GuideModel: ProgramSheetModel {
         do {
             let data = try await app.post("api/programs/\(item.id)/record")
             guard let response = try? JSONDecoder().decode(RecordResponse.self, from: data) else {
-                await reload()
+                await refresh()
                 return nil
             }
             if response.reserved {
-                await reload()
+                await refresh()
                 return nil
             }
             return response.reason ?? String(localized: "録画できません")
@@ -174,7 +310,7 @@ final class GuideModel: ProgramSheetModel {
     func cancel(_ item: GuideProgramItem) async -> String? {
         do {
             _ = try await app.delete("api/programs/\(item.id)/record")
-            await reload()
+            await refresh()
             return nil
         } catch {
             return Self.failureMessage(error)
