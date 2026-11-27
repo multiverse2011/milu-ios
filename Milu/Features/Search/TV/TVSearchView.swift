@@ -147,7 +147,9 @@ struct TVSearchView: View {
             }
             // 左の余白は TabView(.sidebarAdaptable) の安全領域に任せる (録画の一覧と同じ)
             .padding(.trailing, 40)
-            .padding(.top, 56)
+            // 上の余白は小さくする。結果の先頭へフォーカスが移ると tvOS が結果を上へ送り、
+            // 検索欄が左上の「検索」の札に潜り込む (カードの題名を絵の下へ移して縦に伸びたため)
+            .padding(.top, 8)
             .padding(.bottom, 60)
         }
     }
