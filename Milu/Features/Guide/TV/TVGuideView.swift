@@ -127,18 +127,22 @@ private struct TVGuideBoard: View {
             repairFocus(services, now: Date())
         }
         // 焦点が列に移ったら、基準の時刻でその列の番組を選ぶ。左右の移動はこれだけで決める
-        .onChange(of: focus) { _, new in
-            switch new {
-            case .some(.column(let column)):
-                lastColumn = column
-            case .some:
-                // 自分で格子の外 (チップ) へ出た。直す対象ではない
-                lastColumn = nil
-            case .none:
-                // サイドバー・詳細など。的が消えて落ちた場合に備えて最後の列を残す
-                break
+        .onChange(of: focus) { old, new in
+            guard case .column(let column) = new else {
+                // チップ (自分で格子の外へ出た) なら最後の列はもう要らない。
+                // サイドバー・詳細 (nil) は、的が消えて落ちた場合に備えて残す
+                if case .some = new { lastColumn = nil }
+                return
             }
-            guard case .column(let column) = new, let base = resolvedCursor(now: Date()) else { return }
+            // チップやサイドバーから格子へ入り直したときは、いた列 (カーソルの列) へ戻す。
+            // 焦点の仕組みはチップの真下の列を選ぶので、そのままだと別の局へ飛んで見える
+            if case .some(.column) = old {} else if let base = cursor, base.column != column,
+                      GuideCursorMotion.isUsable(base.column, in: guide.services) {
+                focus = .column(base.column)
+                return
+            }
+            lastColumn = column
+            guard let base = resolvedCursor(now: Date()) else { return }
             let next = GuideCursorMotion.horizontal(base, in: guide.services, by: column - base.column) ?? base
             animate(to: next, in: guide.services)
         }
