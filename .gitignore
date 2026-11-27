@@ -1,0 +1,10 @@
+Milu.xcodeproj/
+# project.yml から生成される
+Milu/Info.plist
+DerivedData/
+screenshots/
+xcuserdata/
+.DS_Store
+.build/
+
+artifacts/testflight/

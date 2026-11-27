@@ -1,0 +1,129 @@
+name: Milu
+options:
+  bundleIdPrefix: com.ayushio
+  deploymentTarget:
+    iOS: "27.0"
+    tvOS: "27.0"
+  developmentLanguage: ja
+  knownRegions:
+    - ja
+    - en
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+targets:
+  Milu:
+    type: application
+    platform: iOS
+    supportedDestinations: [iOS, tvOS]
+    sources: [Milu]
+    dependencies:
+      # AppIntents は使っていないが、リンクしないと Xcode のメタデータ抽出が「no AppIntents.framework dependency found」と警告する
+      - sdk: AppIntents.framework
+      # Apple TV の表示のモード (AVDisplayManager) は AVKit の UIWindow の分類にある。
+      # 見出しだけで参照するとリンクされず、実行時に unrecognized selector になる
+      - sdk: AVKit.framework
+        platformFilter: tvOS
+    settings:
+      base:
+        # 端末の種類は SDK ごとに分ける (iOS は iPhone/iPad、tvOS は Apple TV)
+        "TARGETED_DEVICE_FAMILY[sdk=iphone*]": "1,2"
+        "TARGETED_DEVICE_FAMILY[sdk=*tv*]": "3"
+        PRODUCT_BUNDLE_IDENTIFIER: com.ayushio.milu
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_EMIT_LOC_STRINGS: YES
+        # tvOS の Info.plist は向き・UIBackgroundModes など iOS だけのキーを持たない
+        "INFOPLIST_FILE[sdk=*tv*]": Config/Info-tvOS.plist
+        # tvOS は Apple TV 用の画面 (Features/*/TV/) を使う。iPhone/iPad の画面は tvOS では作らない (D27)。
+        # iPhone/iPad 専用の View を足したら、この一覧にも足すこと
+        "EXCLUDED_SOURCE_FILE_NAMES[sdk=*tv*]": "Milu/App/MainTabView.swift Milu/App/AppDelegate.swift Milu/Features/Connect/ConnectView.swift Milu/Features/Connect/PairView.swift Milu/Features/Guide/GuideTab.swift Milu/Features/Guide/GuideView.swift Milu/Features/Guide/ProgramSheetView.swift Milu/Features/Live/LiveControls.swift Milu/Features/Live/LivePlayerView.swift Milu/Features/Live/LiveView.swift Milu/Features/Live/ServiceLogo.swift Milu/Features/Recordings/RecordingControls.swift Milu/Features/Recordings/RecordingDetailView.swift Milu/Features/Recordings/RecordingPoster.swift Milu/Features/Recordings/RecordingWatchView.swift Milu/Features/Recordings/RecordingsSearchResults.swift Milu/Features/Recordings/RecordingsView.swift Milu/Features/Settings/LicensesView.swift Milu/Features/Settings/ServerView.swift Milu/Features/Settings/SettingsView.swift"
+        # 画面は tvOS だけ。iPhone/iPad のビルドには入れない。
+        # TV の画面は Features/<機能>/TV/ に置くこと (この glob より深い所は外れない)
+        "EXCLUDED_SOURCE_FILE_NAMES[sdk=iphone*]": "Milu/*/TV/*.swift Milu/*/*/TV/*.swift"
+    # iOS の Info.plist。tvOS にも要るキーを足したら Config/Info-tvOS.plist にも足す
+    info:
+      path: Milu/Info.plist
+      properties:
+        CFBundleDisplayName: Milu
+        CFBundleLocalizations:
+          - ja
+          - en
+        # 書かないと XcodeGen が 1.0 / 1 を直書きし、上の MARKETING_VERSION と CURRENT_PROJECT_VERSION が効かない
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.entertainment
+        UIBackgroundModes:
+          - audio
+        UILaunchScreen: {}
+        # D12: http を許すかはアプリが決める (家の中だけ)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: ローカルネットワーク上の denpa に接続するために使用します。
+        UIAppFonts:
+          - denpa-font.ttf
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+  MiluTests:
+    type: bundle.unit-test
+    platform: iOS
+    supportedDestinations: [iOS, tvOS]
+    sources:
+      - path: MiluTests
+        excludes: [Fixtures]
+      - path: MiluTests/Fixtures
+        buildPhase: resources
+    dependencies:
+      - target: Milu
+      # アプリと同じ警告 (no AppIntents.framework dependency found) を消すため
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        # iPhone/iPad の画面を試すものは Apple TV には無い
+        "EXCLUDED_SOURCE_FILE_NAMES[sdk=*tv*]": "MiluTests/App/RootViewTests.swift MiluTests/Player/OrientationLockTests.swift"
+        # Apple TV の画面を試すものは iOS には無い
+        "EXCLUDED_SOURCE_FILE_NAMES[sdk=iphone*]": "MiluTests/Features/Live/TVLiveTextTests.swift MiluTests/Features/Shared/TVReadingTests.swift"
+  MiluUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    supportedDestinations: [iOS]
+    sources: [MiluUITests]
+    dependencies:
+      - target: Milu
+      # アプリと同じ警告 (no AppIntents.framework dependency found) を消すため
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Milu:
+    build:
+      targets:
+        Milu: all
+    # 既存テストが日本語の文言を比べるので test を ja/JP に固定する
+    test:
+      language: ja
+      region: JP
+      targets:
+        - MiluTests
+  MiluScreenshots:
+    build:
+      targets:
+        Milu: all
+        MiluUITests: [test]
+    test:
+      targets:
+        - MiluUITests
