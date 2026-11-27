@@ -99,7 +99,8 @@ nonisolated enum GuideText {
         }
     }
 
-    /// tvOS のマスに入る行の数 (TV-Guide)。題は 25pt・行 34pt、説明は 21pt・行 30pt、上下の余白 20pt、行の間 4pt。
+    /// tvOS のマスに入る行の数 (TV-Guide)。題は .callout (31pt)・行の見積り 34pt、
+    /// 説明は .caption (25pt)・行の見積り 30pt、上下の余白 20pt、行の間 4pt。
     /// iPhone/iPad と違い、予約の印は題の行に並べるので、印のぶんの行は取らない。
     static func tvCellLines(height: Double) -> (title: Int, description: Int) {
         let titleLine = 34.0
