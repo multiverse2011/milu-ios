@@ -3128,71 +3128,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Skip commercials"
+            "value" : "Skip Ads"
           }
         }
       }
     },
-    "字幕 オン" : {
+    "字幕・CM" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Subtitles On"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "字幕 オン"
-          }
-        }
-      }
-    },
-    "字幕 オフ" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subtitles Off"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "字幕 オフ"
-          }
-        }
-      }
-    },
-    "CM 飛ばし オン" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skip Ads On"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CM 飛ばし オン"
-          }
-        }
-      }
-    },
-    "CM 飛ばし オフ" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skip Ads Off"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CM 飛ばし オフ"
+            "value" : "Subtitles & Ads"
           }
         }
       }

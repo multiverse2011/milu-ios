@@ -345,7 +345,7 @@ struct TVRecordingPlayerView: View {
                 }
             }
         } label: {
-            menuLabel("速度", value)
+            TVMenuLabel(name: "速度", value: value)
         }
         .buttonStyle(.bordered)
         .focused($control, equals: .speed)
@@ -360,14 +360,17 @@ struct TVRecordingPlayerView: View {
         let showsRung = !session.rungItems.isEmpty
         if showsQuality || showsRung {
             let name: LocalizedStringKey = showsQuality ? "画質" : "解像度"
-            let value = showsQuality
-                ? TVLiveText.quality(selected: session.selectedQuality, current: session.currentCodec)
-                : rungTitle
+            let quality = TVLiveText.quality(selected: session.selectedQuality, current: session.currentCodec)
+            let rungSuffix = session.selectedRung != 0 && !rungTitle.isEmpty ? "・\(rungTitle)" : ""
+            let value = showsQuality ? quality + rungSuffix : rungTitle
             Menu {
                 if showsQuality {
                     Section("画質") {
                         ForEach(Array(session.qualityItems.enumerated()), id: \.offset) { _, item in
-                            TVMenuOption(title: item.title, selected: item.codec == session.selectedQuality) {
+                            TVMenuOption(
+                                title: qualityOptionTitle(item),
+                                selected: item.codec == session.selectedQuality
+                            ) {
                                 session.selectQuality(item.codec)
                             }
                         }
@@ -383,13 +386,20 @@ struct TVRecordingPlayerView: View {
                     }
                 }
             } label: {
-                menuLabel(name, value)
+                TVMenuLabel(name: name, value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .quality)
             .accessibilityLabel(Text(name))
             .accessibilityValue(Text(value))
         }
+    }
+
+    /// 画質のメニューの行。「自動」にはライブと同じく、いまの形式を添える
+    private func qualityOptionTitle(_ item: PlaybackRules.QualityItem) -> String {
+        item.codec == nil
+            ? TVLiveText.quality(selected: nil, current: session.currentCodec)
+            : item.title
     }
 
     /// 字幕と CM 飛ばしのメニュー。どちらも入り切りだけなので、オン・オフの選択肢を
@@ -399,9 +409,12 @@ struct TVRecordingPlayerView: View {
         let showsCaptions = session.hasCaptions
         let showsCM = !session.isChase
         if showsCaptions || showsCM {
-            let name: LocalizedStringKey = showsCaptions ? "字幕" : "CM 飛ばし"
-            let on = showsCaptions ? session.captionsOn : session.cmSkipEnabled
-            let value = on ? String(localized: "オン") : String(localized: "オフ")
+            let captions = session.captionsOn ? String(localized: "オン") : String(localized: "オフ")
+            let cm = session.cmSkipEnabled ? String(localized: "オン") : String(localized: "オフ")
+            // 両方まとめたときは、どちらの状態も外から分かるようにする
+            let showsBoth = showsCaptions && showsCM
+            let name: LocalizedStringKey = showsBoth ? "字幕・CM" : (showsCaptions ? "字幕" : "CM 飛ばし")
+            let value = showsBoth ? "\(captions)・CM \(cm)" : (showsCaptions ? captions : cm)
             Menu {
                 if showsCaptions {
                     Section("字幕") {
@@ -424,7 +437,7 @@ struct TVRecordingPlayerView: View {
                     }
                 }
             } label: {
-                menuLabel(name, value)
+                TVMenuLabel(name: name, value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .captions)
@@ -438,20 +451,23 @@ struct TVRecordingPlayerView: View {
     private var audioMenu: some View {
         let tracks = session.audioTracks
         if tracks.count > 1 {
-            let value = audioValue
+            let value = tvAudioValue(session.selectedAudio?.label)
             Menu {
                 ForEach(tracks, id: \.id) { track in
-                    TVMenuOption(title: track.label, selected: track.id == session.selectedAudio?.id) {
+                    TVMenuOption(
+                        title: track.label.isEmpty ? String(localized: "音声") : track.label,
+                        selected: track.id == session.selectedAudio?.id
+                    ) {
                         session.selectAudio(track)
                     }
                 }
             } label: {
-                menuLabel("音声", value)
+                TVMenuLabel(name: "音声", value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .audio)
             .accessibilityLabel(Text("音声"))
-            .accessibilityValue(Text(value))
+            .accessibilityValue(Text(value ?? ""))
         }
     }
 
@@ -466,23 +482,9 @@ struct TVRecordingPlayerView: View {
             .focused($control, equals: tag)
     }
 
-    /// メニューのボタンの字 (項目名と今の値)
-    private func menuLabel(_ name: LocalizedStringKey, _ value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(name)
-            Text(value)
-        }
-        .lineLimit(1)
-    }
-
     /// 段 0 は「元のまま」、ほかは「720p」
     private var rungTitle: String {
         session.rungItems.first { $0.rung == session.selectedRung }?.title ?? ""
-    }
-
-    private var audioValue: String {
-        if let label = session.selectedAudio?.label, !label.isEmpty { return label }
-        return String(localized: "音声")
     }
 
     // MARK: - 操作の列の出し入れ

@@ -153,34 +153,6 @@ enum RecordingRules {
         speed == speed.rounded() ? "\(Int(speed))×" : "\(speed)×"
     }
 
-    /// 札を押したときの次の速さ。並びを一巡する (TV-Player の速度の札)。並びに無い値からは先頭へ
-    nonisolated static func nextSpeed(after speed: Double) -> Double {
-        guard let index = speeds.firstIndex(of: speed) else { return speeds[0] }
-        return speeds[(index + 1) % speeds.count]
-    }
-
-    /// 札を押したときの次の画質。並びを一巡する (自動 → AV1 → H.265 → H.264 → 自動)
-    nonisolated static func nextQualityItem(
-        items: [PlaybackRules.QualityItem],
-        selected: OfferCodec?
-    ) -> PlaybackRules.QualityItem? {
-        guard !items.isEmpty else { return nil }
-        let index = items.firstIndex { $0.codec == selected } ?? 0
-        return items[(index + 1) % items.count]
-    }
-
-    /// 札を押したときの次の音声。並びを一巡する。まだ選ばれていなければ先頭
-    nonisolated static func nextAudioChoice(
-        tracks: [AudioChoice],
-        selected: AudioChoice?
-    ) -> AudioChoice? {
-        guard !tracks.isEmpty else { return nil }
-        guard let selected, let index = tracks.firstIndex(where: { $0.id == selected.id }) else {
-            return tracks[0]
-        }
-        return tracks[(index + 1) % tracks.count]
-    }
-
     // MARK: ピクチャ・イン・ピクチャ (#48)
 
     /// 窓に出す観られる範囲。`limit` はシークできる上限、`anchor` は開いているストリームの時刻が 0 になる位置。

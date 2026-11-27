@@ -100,7 +100,11 @@ struct TVLiveMenuView: View {
         let qualityItems = session?.qualityItems ?? []
         let rungItems = session?.rungItems ?? []
         if !qualityItems.isEmpty || !rungItems.isEmpty {
-            let value = TVLiveText.quality(session)
+            let showsQuality = !qualityItems.isEmpty
+            let name: LocalizedStringKey = showsQuality ? "画質" : "解像度"
+            let value = showsQuality
+                ? qualityValue(session)
+                : rungItems.first { $0.rung == session?.selectedRung }?.title ?? ""
             Menu {
                 if !qualityItems.isEmpty {
                     Section("画質") {
@@ -124,13 +128,22 @@ struct TVLiveMenuView: View {
                     }
                 }
             } label: {
-                menuLabel("画質", value)
+                TVMenuLabel(name: name, value: value)
             }
             .buttonStyle(.bordered)
             .focused($focus, equals: .quality)
-            .accessibilityLabel(Text("画質"))
+            .accessibilityLabel(Text(name))
             .accessibilityValue(Text(value))
         }
+    }
+
+    /// 画質の値。解像度を選んでいるときは添える (「自動 (H.264)・540p」)
+    private func qualityValue(_ session: PlaybackSession?) -> String {
+        let quality = TVLiveText.quality(session)
+        guard let session, session.selectedRung != 0,
+              let rung = session.rungItems.first(where: { $0.rung == session.selectedRung })?.title
+        else { return quality }
+        return "\(quality)・\(rung)"
     }
 
     /// 字幕のメニュー。オン/オフだけなので、選択肢 (オン・オフ) を並べて
@@ -148,7 +161,7 @@ struct TVLiveMenuView: View {
                     model.setCaptionsOn(false)
                 }
             } label: {
-                menuLabel("字幕", value)
+                TVMenuLabel(name: "字幕", value: value)
             }
             .buttonStyle(.bordered)
             .focused($focus, equals: .captions)
@@ -162,7 +175,7 @@ struct TVLiveMenuView: View {
     private func audioMenu(_ session: PlaybackSession?) -> some View {
         let tracks = session?.audioTracks ?? []
         if !tracks.isEmpty {
-            let value = audioValue(session)
+            let value = tvAudioValue(session?.selectedAudio?.label)
             Menu {
                 ForEach(tracks, id: \.id) { track in
                     TVMenuOption(
@@ -173,27 +186,13 @@ struct TVLiveMenuView: View {
                     }
                 }
             } label: {
-                menuLabel("音声", value)
+                TVMenuLabel(name: "音声", value: value)
             }
             .buttonStyle(.bordered)
             .focused($focus, equals: .audio)
             .accessibilityLabel(Text("音声"))
-            .accessibilityValue(Text(value))
+            .accessibilityValue(Text(value ?? ""))
         }
-    }
-
-    /// メニューのボタンの字 (項目名と今の値)
-    private func menuLabel(_ name: LocalizedStringKey, _ value: String) -> some View {
-        HStack(spacing: 6) {
-            Text(name)
-            Text(value)
-        }
-        .lineLimit(1)
-    }
-
-    private func audioValue(_ session: PlaybackSession?) -> String {
-        if let label = session?.selectedAudio?.label, !label.isEmpty { return label }
-        return String(localized: "音声")
     }
 
     // MARK: - 種別ごとの局の列
