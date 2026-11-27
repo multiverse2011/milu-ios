@@ -79,6 +79,7 @@ private struct TVGuideBoard: View {
     /// 最後に焦点の当たっていた列。的が消えると focus が nil に落ちるので、直すときの手掛かりに持つ
     @State private var lastColumn: Int?
     @State private var opened: GuideProgramItem?
+    @State private var detailGeneration = 0
     @State private var isDetailCoverActive = false
     @State private var isRestoringDetailFocus = false
     @State private var liveWatchAtOpen: AppModel.LiveWatchRequest?
@@ -106,12 +107,18 @@ private struct TVGuideBoard: View {
     }
 
     var body: some View {
+        let generation = detailGeneration
         // いまの線を 1 分ごとに動かす (iPhone の GuideGrid と同じ)
         TimelineView(.periodic(from: .now, by: 60)) { context in
             content(now: context.date)
         }
-        .fullScreenCover(item: detailPresentation, onDismiss: detailDidDismiss) { item in
-            TVProgramView(item: item, model: model, onClose: closeDetail)
+        .background {
+            // 番組表の identity を保ち、カバーの通知だけを開いた回に結び付ける。
+            Color.clear
+                .fullScreenCover(item: detailPresentation(generation), onDismiss: { detailDidDismiss(generation) }) { item in
+                    TVProgramView(item: item, model: model, onClose: { closeDetail(generation) })
+                }
+                .id(generation)
         }
         .onAppear {
             // ライブへのタブ切り替えで onDismiss が届かなかった場合も、戻ったら詳細を開けるようにする。
@@ -307,13 +314,32 @@ private struct TVGuideBoard: View {
         let highlightedColumn = focus == .aboveGrid ? lastColumn : focusColumn
         let focused = opened == nil && !isRestoringDetailFocus && selected?.column == highlightedColumn ? selected : nil
         let nowY = nowOffset(now: now)
+        let ring = focusFrame(for: focused)
+        let ruler = timeColumn(now: now, nowY: nowY)
         return ZStack(alignment: .topLeading) {
             GuideGridScroll(scrollY: scroll.y) { scrollY in
                 ZStack(alignment: .topLeading) {
-                    columns(gridCells, height: size.height, nowY: nowY, focused: focused, scrollY: scrollY)
-                        .transaction { $0.animation = nil }
-                        .offset(x: GuideLayout.tvTimeWidth - scroll.x)
-                    timeColumn(now: now, nowY: nowY)
+                    ZStack(alignment: .topLeading) {
+                        columns(gridCells, height: size.height, nowY: nowY, focused: focused, scrollY: scrollY)
+                            .transaction { $0.animation = nil }
+                        if let ring {
+                            // 枠自身の座標と高さは、送りとは別に補間する。
+                            GuideFocusRing(rect: ring, scrollY: scrollY)
+                                .fill(Color.accentColor, style: FillStyle(eoFill: true))
+                                .allowsHitTesting(false)
+                        }
+                        if let nowY {
+                            Rectangle()
+                                .fill(Color.red)
+                                .frame(width: contentWidth, height: 2)
+                                .offset(y: nowY - scrollY)
+                                .transaction { $0.animation = nil }
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(width: contentWidth, height: totalHeight, alignment: .topLeading)
+                    .offset(x: GuideLayout.tvTimeWidth - scroll.x)
+                    ruler
                         .offset(y: -scrollY)
                         .transaction { $0.animation = nil }
                 }
@@ -370,6 +396,7 @@ private struct TVGuideBoard: View {
                     let top = cell.top + GuideLayout.tvColumnGap / 2
                     TVGuideCell(
                         item: cell.item,
+                        title: cell.title,
                         height: max(cell.height - GuideLayout.tvColumnGap, 2),
                         viewportTop: scrollY - top,
                         viewportHeight: height,
@@ -387,28 +414,13 @@ private struct TVGuideBoard: View {
                     .frame(width: contentWidth, height: nowY)
                     .offset(y: -scrollY)
                     .allowsHitTesting(false)
-                Rectangle()
-                    .fill(Color.red)
-                    .frame(width: contentWidth, height: 2)
-                    .offset(y: nowY - scrollY)
-                    .allowsHitTesting(false)
-                    .zIndex(2)
-            }
-            // 青枠はマスごとに描かず、1 つだけ置いて送りと同じ動きで移す (ぱっと切り替わらないように)
-            if let ring = focusFrame(for: focused) {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.accentColor, lineWidth: 5)
-                    .frame(width: ring.width, height: ring.height)
-                    .offset(x: ring.x, y: ring.y - scrollY)
-                    // マス (1) より上、いまの線 (2) より下 (画面案の z の順)
-                    .zIndex(1.5)
             }
         }
         .frame(width: contentWidth, height: totalHeight, alignment: .topLeading)
     }
 
     /// 青枠の位置 (フォーカスの当たっているマス)。焦点の列とカーソルの列がそろっているときだけ出す
-    private func focusFrame(for cursor: GuideCursor?) -> (x: Double, y: Double, width: Double, height: Double)? {
+    private func focusFrame(for cursor: GuideCursor?) -> CGRect? {
         guard let cursor,
               let (column, program) = GuideCursorMotion.program(cursor, in: guide.services),
               let frame = GuideLayout.frame(
@@ -419,7 +431,7 @@ private struct TVGuideBoard: View {
                   pointsPerMinute: GuideLayout.tvPointsPerMinute
               )
         else { return nil }
-        return (
+        return CGRect(
             x: Double(column) * columnStep(),
             y: frame.top + GuideLayout.tvColumnGap / 2,
             width: GuideLayout.tvColumnWidth,
@@ -430,16 +442,24 @@ private struct TVGuideBoard: View {
     /// 時刻の列。時の数字と、いまの線の左に出す分 (TV-Guide の画面案)。
     /// 地の色で塗って切り取る (横に送ったマスがここへ潜り込まないように)
     private func timeColumn(now: Date, nowY: Double?) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(0..<24, id: \.self) { hour in
-                let time = from + Double(hour) * 3_600_000
-                Text("\(GuideLayout.calendar.component(.hour, from: Date(timeIntervalSince1970: time / 1000)))")
+        let start = from
+        let hours = (0..<24).map { hour in
+            let time = start + Double(hour) * 3_600_000
+            let date = Date(timeIntervalSince1970: time / 1000)
+            let label = Text("\(GuideLayout.calendar.component(.hour, from: date))")
+            let y = GuideLayout.offset(of: time, from: start, pointsPerMinute: GuideLayout.tvPointsPerMinute) + 6
+            return (hour: hour, label: label, y: y)
+        }
+        let minute = nowY.map { _ in Text("\(GuideLayout.calendar.component(.minute, from: now))") }
+        return ZStack(alignment: .topLeading) {
+            ForEach(hours, id: \.hour) { hour in
+                hour.label
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(TVTheme.muted)
-                    .offset(y: GuideLayout.offset(of: time, from: from, pointsPerMinute: GuideLayout.tvPointsPerMinute) + 6)
+                    .offset(y: hour.y)
             }
-            if let nowY {
-                Text("\(GuideLayout.calendar.component(.minute, from: now))")
+            if let nowY, let minute {
+                minute
                     .font(.system(size: 21, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
@@ -536,7 +556,7 @@ private struct TVGuideBoard: View {
         return max(0, min(scroll.y, scrollLow.y) - margin)...(max(scroll.y, scrollHigh.y) + Double(size.height) + margin)
     }
 
-    private typealias Cell = (item: GuideProgramItem, top: Double, height: Double)
+    private typealias Cell = (item: GuideProgramItem, title: AttributedString, top: Double, height: Double)
 
     private func cells(in column: Int, rows: ClosedRange<Double>) -> [Cell] {
         let service = guide.services[column]
@@ -551,7 +571,8 @@ private struct TVGuideBoard: View {
                 frame.top <= rows.upperBound,
                 frame.top + frame.height >= rows.lowerBound
             else { return nil }
-            return (GuideProgramItem(service: service, program: program), frame.top, frame.height)
+            let item = GuideProgramItem(service: service, program: program)
+            return (item, TVGuideCell.title(for: item), frame.top, frame.height)
         }
     }
 
@@ -626,41 +647,48 @@ private struct TVGuideBoard: View {
         liveWatchAtOpen = app.liveWatch
         isRestoringDetailFocus = false
         isDetailCoverActive = true
+        detailGeneration += 1
         opened = selection.item
     }
 
     /// Menu をシステムが処理してカバーを閉じる場合も、同じ閉じ始めの処理を通す。
-    private var detailPresentation: Binding<GuideProgramItem?> {
-        Binding(get: { opened }, set: { item in
-            if item == nil { closeDetail() }
+    private func detailPresentation(_ generation: Int) -> Binding<GuideProgramItem?> {
+        Binding(get: { detailGeneration == generation ? opened : nil }, set: { item in
+            if item == nil { closeDetail(generation) }
         })
     }
 
-    private func closeDetail() {
-        guard opened != nil else { return }
+    private func closeDetail(_ generation: Int) {
+        guard detailGeneration == generation, opened != nil else { return }
         opened = nil
         // 「ライブで観る」でタブを移ったときは、その画面に焦点を渡す。
         guard liveWatchAtOpen == app.liveWatch else { return }
         isRestoringDetailFocus = true
         DispatchQueue.main.async {
-            restoreDetailFocus()
+            restoreDetailFocus(generation)
         }
     }
 
-    private func detailDidDismiss() {
-        closeDetail()
+    private func detailDidDismiss(_ generation: Int) {
+        guard detailGeneration == generation, isDetailCoverActive else { return }
+        closeDetail(generation)
         isDetailCoverActive = false
         // 閉じ始めの要求がまだ通っていなければ、カバーが外れた時点でもう一度要求する。
-        restoreDetailFocus()
+        restoreDetailFocus(generation)
     }
 
-    private func restoreDetailFocus() {
-        guard isRestoringDetailFocus, liveWatchAtOpen == app.liveWatch,
+    private func restoreDetailFocus(_ generation: Int) {
+        guard detailGeneration == generation, isRestoringDetailFocus, liveWatchAtOpen == app.liveWatch,
               let target = resolvedCursor(now: Date()) else { return }
         cursor = target
         lastColumn = target.column
         follow(target, in: guide.services, animated: false)
-        focus = .column(target.column)
+        let destination = Focus.column(target.column)
+        if focus == destination {
+            isRestoringDetailFocus = false
+        } else {
+            focus = destination
+        }
     }
 
     /// 読み上げる字 (その列で選んでいるマス)
@@ -786,6 +814,30 @@ private struct GuideGridScroll<Content: View>: View, Animatable {
     }
 }
 
+/// 格子内の枠だけを補間し、現在の送り位置を描画時に引く。
+private nonisolated struct GuideFocusRing: Shape {
+    var rect: CGRect
+    let scrollY: Double
+
+    var animatableData: AnimatablePair<CGPoint.AnimatableData, CGSize.AnimatableData> {
+        get { AnimatablePair(rect.origin.animatableData, rect.size.animatableData) }
+        set {
+            rect.origin.animatableData = newValue.first
+            rect.size.animatableData = newValue.second
+        }
+    }
+
+    func path(in bounds: CGRect) -> Path {
+        let frame = rect.offsetBy(dx: 0, dy: -scrollY)
+        var path = Path(roundedRect: frame, cornerRadius: 6)
+        let inside = frame.insetBy(dx: 5, dy: 5)
+        if !inside.isEmpty {
+            path.addRoundedRect(in: inside, cornerSize: CGSize(width: 1, height: 1))
+        }
+        return path
+    }
+}
+
 /// 決定の当たり。番組の無い列は何もしない (決定しても開くものが無い)。
 /// 再生の面と同じく `.onTapGesture` で受ける (実機の決定で動いている書き方)。
 /// 当たりを条件で付け分けると、番組の有無が変わったときに的のビューが作り直されて
@@ -806,6 +858,7 @@ private struct FocusTap: ViewModifier {
 /// 青枠は格子に 1 つだけ置いて動かす (columns) ので、マスは地と字だけを描く。
 private struct TVGuideCell: View {
     let item: GuideProgramItem
+    let title: AttributedString
     let height: Double
     let viewportTop: Double
     let viewportHeight: Double
@@ -824,7 +877,7 @@ private struct TVGuideCell: View {
                         .fill(genreColor)
                         .frame(width: 11, height: 11)
                         .padding(.top, 11)
-                    title
+                    Text(title)
                         .font(DenpaFont.font(size: 25))
                         .foregroundStyle(.primary)
                         .lineLimit(lines.title)
@@ -850,7 +903,7 @@ private struct TVGuideCell: View {
     }
 
     /// 「`H:mm` ✓ 予約済み 番組名」。予約の印は題の行に並べる (TV-Guide の画面案)
-    private var title: Text {
+    static func title(for item: GuideProgramItem) -> AttributedString {
         let time = Wording.time(Date(timeIntervalSince1970: Double(item.startAt) / 1000), calendar: GuideLayout.calendar)
         var text = AttributedString("\(time) ")
         for badge in GuideText.cellBadges(reservation: item.reservation) {
@@ -859,11 +912,11 @@ private struct TVGuideCell: View {
             text.append(run)
         }
         text.append(AttributedString(item.name))
-        return Text(text)
+        return text
     }
 
     /// 録画中は絵のとおり赤い「●」だけにする (iPhone/iPad の「● 録画中」はそのまま)
-    private func mark(of badge: GuideCellBadge) -> String {
+    private static func mark(of badge: GuideCellBadge) -> String {
         badge == .recording ? "●" : badge.text
     }
 
@@ -877,7 +930,7 @@ private struct TVGuideCell: View {
         return Color(.sRGB, red: Double(rgba.r) / 255, green: Double(rgba.g) / 255, blue: Double(rgba.b) / 255)
     }
 
-    private func color(of badge: GuideCellBadge) -> Color {
+    private static func color(of badge: GuideCellBadge) -> Color {
         switch badge {
         case .reserved: Color.accentColor
         case .recording: Color.red
