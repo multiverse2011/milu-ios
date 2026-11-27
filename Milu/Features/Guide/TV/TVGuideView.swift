@@ -119,8 +119,12 @@ private struct TVGuideBoard: View {
         .onChange(of: model.selectedType) { _, _ in reset() }
         // 読み直しで局が減ると表の幅が縮む。古い送り位置のままだと全部が画面の外に出る
         .onChange(of: guide.services.count) { _, _ in
-            let x = clampX(scroll.x)
-            withAnimation(nil) { scroll = CGPoint(x: x, y: scroll.y) }
+            let target = CGPoint(x: clampX(scroll.x), y: scroll.y)
+            withAnimation(nil) {
+                scroll = target
+                scrollLow = target
+                scrollHigh = target
+            }
         }
         // 読み直しで焦点の列が使えなくなったら (番組が消えた・局が減った)、近い列へ移す
         .onChange(of: guide.services) { _, services in
@@ -135,9 +139,11 @@ private struct TVGuideBoard: View {
                 return
             }
             // チップやサイドバーから格子へ入り直したときは、いた列 (カーソルの列) へ戻す。
-            // 焦点の仕組みはチップの真下の列を選ぶので、そのままだと別の局へ飛んで見える
+            // 焦点の仕組みはチップの真下の列を選ぶので、そのままだと別の局へ飛んで見える。
+            // 離れている間にデータが変わっていても合うよう、送りを即座にそろえてから焦点を渡す
             if case .some(.column) = old {} else if let base = cursor, base.column != column,
                       GuideCursorMotion.isUsable(base.column, in: guide.services) {
+                follow(base, in: guide.services, animated: false)
                 focus = .column(base.column)
                 return
             }
@@ -439,12 +445,17 @@ private struct TVGuideBoard: View {
         else { return }
         let anchor = cursor?.anchor ?? Int64(now.timeIntervalSince1970 * 1000)
         guard let target = GuideCursorMotion.fallbackCursor(from: column, anchor: anchor, in: services) else {
-            cursor = nil
-            lastColumn = nil
+            withAnimation(nil) {
+                cursor = nil
+                lastColumn = nil
+            }
             return
         }
-        cursor = target
-        lastColumn = target.column
+        // アニメーション中に読み直しが来ても、カーソルの付け替えは即座にする
+        withAnimation(nil) {
+            cursor = target
+            lastColumn = target.column
+        }
         follow(target, in: services, animated: false)
         if focusColumn != nil {
             focus = .column(target.column)
