@@ -98,6 +98,25 @@ nonisolated enum GuideLayout {
         max(0, nowOffset - viewportHeight / 4)
     }
 
+    /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
+    /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、時刻を優先する。
+    static func tvFollowOffset(
+        scrollY: Double, viewportHeight: Double, anchorY: Double, cell: ClosedRange<Double>?, headingHeight: Double
+    ) -> Double {
+        let margin = min(40, viewportHeight / 2)
+        let y = min(max(scrollY, anchorY - viewportHeight + margin), anchorY - margin)
+        guard let cell, headingHeight > 0, headingHeight <= viewportHeight else { return y }
+        let lower = max(anchorY, cell.lowerBound + headingHeight) - viewportHeight
+        let upper = min(anchorY, cell.upperBound - headingHeight)
+        guard lower <= upper else { return y }
+        return min(max(y, lower), upper)
+    }
+
+    /// 見出しをマスの見えている上端へ寄せる。マスの末尾で見出しがはみ出さないようにする。
+    static func tvCellContentInset(viewportTop: Double, cellHeight: Double, headingHeight: Double) -> Double {
+        min(max(0, viewportTop), max(0, cellHeight - headingHeight))
+    }
+
     /// いまの線の左に出す数字。iPhone が分だけ (「21」)、iPad が `H:mm` (「15:21」)
     static func nowLineLabel(now: Date, horizontalSizeClassRegular: Bool, calendar: Calendar = GuideLayout.calendar) -> String {
         if horizontalSizeClassRegular {

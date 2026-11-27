@@ -60,6 +60,40 @@ struct GuideLayoutTests {
         #expect(GuideLayout.nowLineLabel(now: now, horizontalSizeClassRegular: true) == "15:21")
     }
 
+    @Test func tvFollowShowsBothLinesAtTheBottom() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 0, viewportHeight: 700, anchorY: 680, cell: 682...1230, headingHeight: 88
+        )
+        #expect(offset == 70)
+    }
+
+    @Test func tvCellHeadingTracksTheViewportAndStaysInsideTheCell() {
+        #expect(GuideLayout.tvCellContentInset(viewportTop: -20, cellHeight: 1600, headingHeight: 88) == 0)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1100, cellHeight: 1600, headingHeight: 88) == 1100)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1580, cellHeight: 1600, headingHeight: 88) == 1512)
+    }
+
+    @Test func tvFollowKeepsTheAnchorInsideALongProgram() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 1800, viewportHeight: 700, anchorY: 2000, cell: 500...2160, headingHeight: 88
+        )
+        #expect(offset == 1800)
+    }
+
+    @Test func tvFollowMakesRoomForTheHeadingAtTheTop() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 2000, viewportHeight: 700, anchorY: 2070, cell: 500...2080, headingHeight: 88
+        )
+        #expect(offset == 1992)
+    }
+
+    @Test func tvFollowPreservesTheAnchorWhenTheCellIsTooFarAway() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 1000, viewportHeight: 700, anchorY: 1950, cell: 100...550, headingHeight: 88
+        )
+        #expect(offset == 1290)
+    }
+
     @Test func columns() {
         // 列の幅は iPhone 158pt・iPad 186pt、列の間 2pt
         #expect(GuideLayout.columnWidth(horizontalSizeClassRegular: false) == 158)
