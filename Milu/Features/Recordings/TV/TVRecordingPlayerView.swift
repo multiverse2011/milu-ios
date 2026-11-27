@@ -350,7 +350,7 @@ struct TVRecordingPlayerView: View {
                 }
             }
         } label: {
-            TVMenuLabel(name: "速度", value: value)
+            TVControlLabel(name: "速度", value: value)
         }
         .buttonStyle(.bordered)
         .focused($control, equals: .speed)
@@ -391,7 +391,7 @@ struct TVRecordingPlayerView: View {
                     }
                 }
             } label: {
-                TVMenuLabel(name: name, value: value)
+                TVControlLabel(name: name, value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .quality)
@@ -417,7 +417,7 @@ struct TVRecordingPlayerView: View {
             Button {
                 session.setCaptionsOn(!on)
             } label: {
-                TVMenuLabel(name: "字幕", value: value)
+                TVControlLabel(name: "字幕", value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .captions)
@@ -435,7 +435,7 @@ struct TVRecordingPlayerView: View {
             Button {
                 session.setCmSkip(!on)
             } label: {
-                TVMenuLabel(name: "CM 飛ばし", value: value)
+                TVControlLabel(name: "CM 飛ばし", value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .cmSkip)
@@ -460,7 +460,7 @@ struct TVRecordingPlayerView: View {
                     }
                 }
             } label: {
-                TVMenuLabel(name: "音声", value: value)
+                TVControlLabel(name: "音声", value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .audio)

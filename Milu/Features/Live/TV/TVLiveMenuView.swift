@@ -128,7 +128,7 @@ struct TVLiveMenuView: View {
                     }
                 }
             } label: {
-                TVMenuLabel(name: name, value: value)
+                TVControlLabel(name: name, value: value)
             }
             .buttonStyle(.bordered)
             .focused($focus, equals: .quality)
@@ -156,7 +156,7 @@ struct TVLiveMenuView: View {
             Button {
                 model.setCaptionsOn(!on)
             } label: {
-                TVMenuLabel(name: "字幕", value: value)
+                TVControlLabel(name: "字幕", value: value)
             }
             .buttonStyle(.bordered)
             .focused($focus, equals: .captions)
@@ -181,7 +181,7 @@ struct TVLiveMenuView: View {
                     }
                 }
             } label: {
-                TVMenuLabel(name: "音声", value: value)
+                TVControlLabel(name: "音声", value: value)
             }
             .buttonStyle(.bordered)
             .focused($focus, equals: .audio)

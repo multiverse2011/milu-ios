@@ -14,9 +14,9 @@ struct TVChannelLogo: View {
     }
 }
 
-/// メニューのボタンの字 (項目名と今の値)。値が空なら項目名だけを出す
+/// 操作の列のボタンの字 (項目名と今の値)。値が空なら項目名だけを出す
 /// (音声の名前が空のときに「音声 音声」と重ねない)。
-struct TVMenuLabel: View {
+struct TVControlLabel: View {
     let name: LocalizedStringKey
     let value: String?
 
