@@ -2311,6 +2311,16 @@
         }
       }
     },
+    "速度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed"
+          }
+        }
+      }
+    },
     "番組内容 (見出し)" : {
       "localizations" : {
         "en" : {
@@ -3109,6 +3119,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "次のチャプター"
+          }
+        }
+      }
+    },
+    "CM 飛ばし" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip commercials"
           }
         }
       }
