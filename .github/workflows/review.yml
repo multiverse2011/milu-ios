@@ -1,0 +1,70 @@
+name: review
+
+# PR を LLM にレビューさせる。runner は管理者の自前の環境 (ラベル homelab-review) なので、
+# フォークからの PR では動かさない。
+# - pull_request_target は使わない (フォークのコードに secret と自前の runner を渡すことになる)
+# - フォークの PR は、ワークフローを書き換えれば下の if を外せる。本当の歯止めはリポジトリの設定
+#   「Require approval for all external contributors」で、承認するまで runner に何も届かない。
+#   承認する前に、.github/ の変更が無いかを必ず見る
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # フォークの PR と、管理者以外が出した PR は対象外 (フォークには secret も渡らない)
+    if: >-
+      !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login == github.repository_owner
+    runs-on: [self-hosted, homelab-review]
+    # 1 run で 50〜60 本を直列に呼び、合計 15 分前後かかる。15 分だと毎回 cancelled になる
+    timeout-minutes: 30
+    steps:
+      # public で LAN の runner を使うので、タグではなく commit に固定する
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          # GITHUB_TOKEN を .git/config に残さない (レビューは gh だけで足りる)
+          persist-credentials: false
+      # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB は bubblewrap で Bash の子プロセスから鍵を消す。runner のイメージの更新などで
+      # bwrap が動かなくなったまま黙ってレビューを続けないよう、ここで止める
+      - name: bubblewrap が動くことを確かめる
+        run: bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent true
+      # Claude Code を LiteLLM 経由で Kimi Code へ向けて動かす (鍵は LiteLLM が持ち、ここには仮想キーだけ)
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
+        env:
+          ANTHROPIC_BASE_URL: ${{ vars.LITELLM_BASE_URL }}
+          ANTHROPIC_MODEL: kimi/kimi-for-coding
+          ANTHROPIC_DEFAULT_FABLE_MODEL: kimi/kimi-for-coding
+          ANTHROPIC_DEFAULT_OPUS_MODEL: kimi/kimi-for-coding
+          ANTHROPIC_DEFAULT_SONNET_MODEL: kimi/kimi-for-coding
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: kimi/kimi-for-coding
+          CLAUDE_CODE_SUBAGENT_MODEL: kimi/kimi-for-coding
+          # Bash ツールの子プロセスから仮想キーなどを消す。PR 経由のプロンプトインジェクションで
+          # `gh pr comment "$ANTHROPIC_API_KEY"` のように展開させても空になる
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1
+        with:
+          anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            この PR をレビューしてください。バグ、競合状態、エラー処理の漏れ、
+            セキュリティ上の問題を優先し、スタイルの好みは指摘しないでください。
+            指摘はファイル名と行番号を添えて、`gh pr comment <番号> --body "<本文>"` で1件のコメントにまとめ、
+            本文は --body に直接渡してください（ファイルへの書き出しや heredoc は許可されていません）。
+            日本語で書いてください。
+            問題がなければ短くそう書くだけで構いません。
+          claude_args: |
+            --model kimi/kimi-for-coding
+            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
