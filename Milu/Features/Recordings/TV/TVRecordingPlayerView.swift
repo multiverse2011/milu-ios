@@ -59,7 +59,6 @@ struct TVRecordingPlayerView: View {
             }
         }
         .task { await session.start() }
-        .onAppear { surfaceFocused = true }
         .onDisappear {
             hideTask?.cancel()
             focusTask?.cancel()
@@ -144,14 +143,20 @@ struct TVRecordingPlayerView: View {
                         break
                     }
                 }
-                // 長押しとタップは排他。長押しのあとに来る決定で再生/一時停止を動かさない (3.5.1)
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.6)
-                        .onEnded { _ in openDetail() }
-                        .exclusively(before: TapGesture().onEnded { session.togglePlayCommand() })
-                )
+                // 決定で一時停止・再開、長押しで詳細 (3.5.1)。
+                // 2 つを `exclusively` で組むと tvOS の決定でタップが出ないので、ライブの映像の面と同じく別々に受ける。
+                // 長押しのあとに離したときの決定は、詳細を開いた時点で受け止める
+                .onTapGesture {
+                    guard !showDetail else { return }
+                    session.togglePlayCommand()
+                }
+                .onLongPressGesture(minimumDuration: 0.6) {
+                    openDetail()
+                }
         }
         .ignoresSafeArea()
+        // 開いた直後は映像の面に焦点を置く (純正と同じ)。fullScreenCover の中では onAppear の代入では効かない
+        .defaultFocus($surfaceFocused, true)
     }
 
     /// 絵の下の地。映像の下だけを滑らかに暗くする (画面案 TV-Player は下 520px)
