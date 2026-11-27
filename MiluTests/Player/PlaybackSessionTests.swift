@@ -31,6 +31,24 @@ import Testing
         )
     }
 
+    private func captionPage(text: String = "字幕") -> CaptionPage {
+        CaptionPage(
+            v: 1,
+            plane: [960, 540],
+            duration: nil,
+            runs: [
+                CaptionRun(
+                    x: 0, y: 0, w: 40, h: 60, fx: 2, fy: 12, size: 36, scaleX: 1,
+                    text: text, joined: nil, drcs: nil,
+                    fg: "#ffffffff", bg: "#00000080",
+                    stroke: nil, underline: nil, bold: nil, italic: nil,
+                    box: nil, flash: nil, ruby: nil
+                )
+            ],
+            drcs: nil
+        )
+    }
+
     private func makeService(
         programTitle: String = "ニュース",
         audios: [AudioTrack] = []
@@ -188,6 +206,54 @@ import Testing
         clock.value = clock.value.addingTimeInterval(1)
         #expect(!session.togglePlayPause())
         #expect(session.phase == .idle)
+    }
+
+    /// 一時停止しても、止めた絵に出ていた最後の字幕を消さない
+    @Test func pauseKeepsTheLastCaptionPage() {
+        let session = makeSession()
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 1,
+            timeline: 1,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation
+        ))
+        // 0.5 秒の字幕が届き、いま出ている
+        session.handleCaption(CaptionFrame(timestamp90kHz: 45_000, content: .page(captionPage())))
+        #expect(session.captionPage != nil)
+
+        #expect(session.pause())
+        #expect(session.phase == .paused)
+        #expect(session.captionPage != nil)
+    }
+
+    /// 同じ局の再開では、字幕のボタンを落とさない (次の 1 枚が届くまでの数秒)
+    @Test func resumeKeepsTheHasCaptionsButton() {
+        let clock = Box(Date())
+        let session = makeSession(clock: { clock.value })
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 1,
+            timeline: 1,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation
+        ))
+        session.handleCaption(CaptionFrame(timestamp90kHz: 45_000, content: .page(captionPage())))
+        #expect(session.hasCaptions)
+
+        #expect(session.pause())
+        clock.value = clock.value.addingTimeInterval(1)
+        #expect(session.play())
+        #expect(session.phase == .loading)
+        #expect(session.hasCaptions)
     }
 
     @Test func videoFailureInBackgroundDoesNotStopPlayback() {

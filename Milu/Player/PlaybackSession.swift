@@ -370,7 +370,11 @@ final class PlaybackSession {
 
     private func resume() -> Bool {
         if phase == .paused {
+            // 同じ局の続き。字幕のある局なら、次の 1 枚が届く数秒も字幕のボタンを出しておく
+            // (局を替えたとき・open() は今までどおり落とす)
+            let hadCaptions = hasCaptions
             startStream(resetPolicy: true)
+            hasCaptions = hadCaptions
             publishNowPlaying(isPlaying: true)
             pictureInPicture?.invalidatePlaybackState()
         }
@@ -400,7 +404,7 @@ final class PlaybackSession {
         loader = nil
         captionSource?.stop()
         captionSource = nil
-        captionPage = nil
+        // 止めた絵に最後の字幕を残す (止めている間は新しい 1 枚が来ない)
         renderer?.pause()
         UIApplication.shared.isIdleTimerDisabled = false
         publishNowPlaying(isPlaying: false)
@@ -782,7 +786,8 @@ final class PlaybackSession {
         source.start()
     }
 
-    private func handleCaption(_ frame: CaptionFrame) {
+    /// テストからも呼ぶ (字幕の 1 枚を流して、一時停止したときの `captionPage` を見る)
+    func handleCaption(_ frame: CaptionFrame) {
         guard case .page(let page) = frame.content else { return }
         hasCaptions = true
         // 変換したライブのページの時刻は、映像と同じ fMP4 の時刻 (4.4・api.md)
