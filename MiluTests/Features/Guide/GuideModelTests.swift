@@ -395,18 +395,234 @@ import Testing
         #expect(model.tvBase == base)
     }
 
-    @Test func tvWindowStopsAtUntilDay() async throws {
+    @Test func tvWindowAppliesUntilOnTheInitialLoad() async throws {
         let now = fixedNow()
         let day = GuideLayout.broadcastDay(for: now)
-        // サーバーの番組が翌 3:00 で終わる (翌日のチップは出ない)
         let until = GuideLayout.broadcastRange(for: day).to - 3_600_000
-        let (model, _, _) = fixture(tvTransport(until: until), now: now)
+        let requests = Box<[Int64]>([])
+        let stub = tvTransport(until: { until }, before: { _, from in requests.value.append(from) })
+        let (model, _, _) = fixture(stub, now: now)
+
         await model.tvStart(now: now)
-        // 初回は until を知らないので翌日まで読む
-        #expect(model.tvDays == [day, dayOffset(1, from: day)])
-        await model.tvReload(center: day, now: now)
-        // until が翌日の 4:00 より前なので、翌日は落ちる
+
+        #expect(requests.value.count == 2)
         #expect(model.tvDays == [day])
+        #expect(model.tvGuide?.until == until)
+    }
+
+    @Test func tvForcedRefreshAppliesAShrinkingUntilEvenWhenItExcludesTheCenter() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let next = dayOffset(1, from: day)
+        let until = Box<Int64?>(nil)
+        let (model, _, _) = fixture(tvTransport(until: { until.value }), now: now)
+        await model.tvStart(now: now)
+        await model.tvReload(center: next, now: now)
+
+        until.value = GuideLayout.broadcastRange(for: day).to - 3_600_000
+        await model.refresh(now: now)
+        #expect(model.tvDays == [day])
+        #expect(model.tvGuide?.until == until.value)
+    }
+
+    @Test(arguments: [-1, 1]) func tvExtendsPastADayWithoutProgramsInTheSelectedService(direction: Int) async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let center = dayOffset(4, from: base)
+        let vacant = dayOffset(direction, from: center)
+        let target = dayOffset(2 * direction, from: center)
+        let targetStart = GuideLayout.broadcastRange(for: target).from
+        let started = Gate()
+        let release = Gate()
+        let stub = tvTransport(empty: { $0 == GuideLayout.broadcastRange(for: vacant).from }, before: { _, from in
+            if from == targetStart {
+                await started.open()
+                await release.wait()
+            }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        await model.tvReload(center: center, now: now)
+        let centerStart = GuideLayout.broadcastRange(for: center).from
+        let originalDays = model.tvDays
+        let cursor = GuideCursor(column: 0, programID: centerStart, anchor: centerStart)
+        var moved: GuideCursor?
+
+        let move = Task { await model.tvExtend(from: cursor, direction: direction, now: now) { moved = $0 } }
+        await started.wait()
+        #expect(model.tvDays == originalDays)
+        #expect(moved == nil)
+        await release.open()
+        let result = await move.value
+
+        #expect(result == .moved)
+        #expect(moved?.programID == targetStart)
+        #expect(model.tvDays.contains(target))
+        #expect(model.tvDays.count <= 3)
+    }
+
+    @Test func tvReportsAnExhaustedTopWhenEarlierDaysHaveOnlyOtherServices() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let center = dayOffset(3, from: base)
+        let centerStart = GuideLayout.broadcastRange(for: center).from
+        let (model, _, _) = fixture(tvTransport(empty: { $0 < centerStart }), now: now)
+        await model.tvStart(now: now)
+        await model.tvReload(center: center, now: now)
+        let days = model.tvDays
+        let cursor = GuideCursor(column: 0, programID: centerStart, anchor: centerStart)
+
+        #expect(await model.tvExtend(from: cursor, direction: -1, now: now) == .exhausted)
+        #expect(model.tvDays == days)
+    }
+
+    @Test func tvRetainsTheOutgoingDayUntilTheLatestScrollEnds() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let center = dayOffset(3, from: base)
+        let before = dayOffset(-1, from: center)
+        let after = dayOffset(1, from: center)
+        let (model, _, _) = fixture(tvTransport(), now: now)
+        await model.tvStart(now: now)
+        await model.tvReload(center: center, now: now)
+        let originalDays = model.tvDays
+        let outgoingProgram = GuideLayout.broadcastRange(for: after).from
+
+        model.tvSetScrollAnimating(true)
+        await model.tvReload(center: before, now: now)
+        #expect(model.tvDays == originalDays)
+        #expect(model.program(id: outgoingProgram) != nil)
+        // 補間が続く間に反対へ送り直す。
+        await model.tvReload(center: after, now: now)
+        #expect(model.tvDays == originalDays)
+        model.tvSetScrollAnimating(false)
+        #expect(model.tvDays == [center, after, dayOffset(2, from: center)])
+
+        model.tvSetScrollAnimating(true)
+        await model.tvReload(center: before, now: now)
+        #expect(model.program(id: outgoingProgram) != nil)
+        model.tvSetScrollAnimating(false)
+        #expect(model.program(id: outgoingProgram) == nil)
+        #expect(model.tvDays.last == center)
+    }
+
+    @Test func tvExplicitSelectionSharesAnInFlightPrefetch() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let target = dayOffset(3, from: day)
+        let targetStart = GuideLayout.broadcastRange(for: target).from
+        let started = Gate()
+        let release = Gate()
+        let count = Box(0)
+        let selecting = Box(false)
+        let stub = tvTransport(before: { _, from in
+            guard from == targetStart else { return }
+            count.value += 1
+            await started.open()
+            await release.wait()
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let prefetch = Task { await model.tvReload(center: target, now: now) }
+        await started.wait()
+        let selection = Task {
+            selecting.value = true
+            return await model.tvReload(center: target, now: now, explicit: true)
+        }
+        while !selecting.value { await Task.yield() }
+        await release.open()
+
+        #expect(await selection.value)
+        #expect(await prefetch.value)
+        #expect(count.value == 1)
+        #expect(model.tvDays.contains(target))
+    }
+
+    @Test func tvExplicitAThenBThenAStartsANewReadForTheLastChoice() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let a = dayOffset(3, from: day)
+        let b = dayOffset(6, from: day)
+        let aStart = GuideLayout.broadcastRange(for: a).from
+        let bStart = GuideLayout.broadcastRange(for: b).from
+        let firstAStarted = Gate()
+        let bStarted = Gate()
+        let releaseA = Gate()
+        let releaseB = Gate()
+        let aCount = Box(0)
+        let stub = tvTransport(before: { _, from in
+            if from == aStart {
+                aCount.value += 1
+                if aCount.value == 1 {
+                    await firstAStarted.open()
+                    await releaseA.wait()
+                }
+            } else if from == bStart {
+                await bStarted.open()
+                await releaseB.wait()
+            }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let firstA = Task { await model.tvReload(center: a, now: now, explicit: true) }
+        await firstAStarted.wait()
+        let readB = Task { await model.tvReload(center: b, now: now, explicit: true) }
+        await bStarted.wait()
+
+        let lastA = await model.tvReload(center: a, now: now, explicit: true)
+        await releaseB.open()
+        await releaseA.open()
+
+        #expect(lastA)
+        #expect(!(await firstA.value))
+        #expect(!(await readB.value))
+        #expect(aCount.value == 2)
+        #expect(model.tvDays.contains(a))
+    }
+
+    @Test func tvFailedTypeSelectionKeepsTheOldChipAndTheSameChoiceCanRetry() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let dayStart = GuideLayout.broadcastRange(for: day).from
+        let fail = Box(true)
+        let stub = tvTransport(before: { type, from in
+            if type == "CS", from == dayStart, fail.value { throw URLError(.timedOut) }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        model.tvSelectType(.CS)
+
+        #expect(!(await model.tvReload(center: day, now: now, explicit: true)))
+        #expect(model.selectedType == .GR)
+        #expect(model.tvGuide?.type == .GR)
+
+        fail.value = false
+        model.tvSelectType(.CS)
+        #expect(await model.tvReload(center: day, now: now, explicit: true))
+        #expect(model.selectedType == .CS)
+        #expect(model.tvGuide?.type == .CS)
+    }
+
+    @Test func tvFailedWindowDoesNotCacheItsSuccessfulNeighbor() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let far = dayOffset(4, from: day)
+        let farStart = GuideLayout.broadcastRange(for: far).from
+        let previousStart = GuideLayout.broadcastRange(for: dayOffset(-1, from: far)).from
+        let failures = Box(true)
+        let requests = Box(0)
+        let stub = tvTransport(fails: { $0 == farStart && failures.value }, before: { _, from in
+            if from == previousStart { requests.value += 1 }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+
+        #expect(!(await model.tvReload(center: far, now: now, explicit: true)))
+        #expect(!(await model.tvReload(center: far, now: now, explicit: true)))
+        failures.value = false
+        #expect(await model.tvReload(center: far, now: now, explicit: true))
+        #expect(requests.value == 3)
+        #expect(model.tvDays.count == 3)
     }
 
     @Test func tvStartWithOnlyOpenDayMissingShowsFailure() async throws {
@@ -476,8 +692,10 @@ import Testing
     /// tvOS の窓の読み。要求された from/to の日に 1 本ずつ番組を返す。
     /// `fails` は from (放送日の 4:00) で決める。from/to が読めない要求は失敗にする
     private func tvTransport(
-        until: Int64? = nil,
-        fails: @escaping @Sendable (Int64) -> Bool = { _ in false }
+        until: @escaping @Sendable () -> Int64? = { nil },
+        fails: @escaping @Sendable (Int64) -> Bool = { _ in false },
+        empty: @escaping @Sendable (Int64) -> Bool = { _ in false },
+        before: @escaping @Sendable (String, Int64) async throws -> Void = { _, _ in }
     ) -> StubTransport {
         StubTransport { request in
             let path = request.url?.path ?? ""
@@ -485,18 +703,27 @@ import Testing
                 return reply(request, 200, self.servicesJSON)
             }
             let query = request.url?.query ?? ""
-            guard let fromPart = query.split(separator: "&").first(where: { $0.hasPrefix("from=") }),
+            guard let typePart = query.split(separator: "&").first(where: { $0.hasPrefix("type=") }),
+                  let fromPart = query.split(separator: "&").first(where: { $0.hasPrefix("from=") }),
                   let from = Int64(fromPart.dropFirst(5)),
                   let toPart = query.split(separator: "&").first(where: { $0.hasPrefix("to=") }),
                   let to = Int64(toPart.dropFirst(3))
             else { throw URLError(.badURL) }
+            let type = String(typePart.dropFirst(5))
+            try await before(type, from)
             guard !fails(from) else { throw URLError(.timedOut) }
-            let untilValue = until.map { "\($0)" } ?? "null"
+            let untilValue = until().map { "\($0)" } ?? "null"
+            let programFields = """
+            "name":"番組","startAt":\(from),"endAt":\(from + 3600000),
+            "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null
+            """
+            let programs = empty(from) ? "" : "{\"id\":\(from),\(programFields)}"
             let body = """
-            {"type":"GR","from":\(from),"to":\(to),"until":\(untilValue),"services":[
+            {"type":"\(type)","from":\(from),"to":\(to),"until":\(untilValue),"services":[
               {"id":3273601024,"name":"ＮＨＫ総合１・東京","mainId":null,"remoteControlKey":1,"logo":null,
-               "programs":[{"id":\(from),"name":"番組","startAt":\(from),"endAt":\(from + 3600000),
-                 "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null}]}]}
+               "programs":[\(programs)]},
+              {"id":2,"name":"別の局","mainId":null,"remoteControlKey":2,"logo":null,
+               "programs":[{"id":\(from + 1),\(programFields)}]}]}
             """
             return reply(request, 200, body)
         }
