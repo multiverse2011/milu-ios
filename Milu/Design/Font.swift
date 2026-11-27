@@ -10,16 +10,20 @@ nonisolated enum DenpaFont {
     }
 
     /// 放送の字を、アプリの字と同じテキストスタイルの大きさに揃える (TV の画面)。
-    /// 端末の文字の大きさの設定にも、システム書体と同じように従う
+    /// 大きさはシステム書体の同じ段に合わせる。文字の大きさの設定があれば、それにも同じように従う
     static func font(_ style: Font.TextStyle) -> Font {
-        .custom(postScriptName, size: baseSize(of: style), relativeTo: style)
+        // tvOS に largeTitle が無いので .body の段として扱う。relativeTo も揃える
+        let relativeTo: Font.TextStyle = style == .largeTitle ? .body : style
+        return .custom(postScriptName, size: baseSize(of: style), relativeTo: relativeTo)
     }
 
     /// 標準の大きさのときの値を、いまの設定から割り出す。OS ごとに変わる値を直書きしない
-    private static func baseSize(of style: Font.TextStyle) -> CGFloat {
+    static func baseSize(of style: Font.TextStyle) -> CGFloat {
         let uiStyle = uiStyle(style)
-        let scale = UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: 100) / 100
-        return UIFont.preferredFont(forTextStyle: uiStyle).pointSize / scale
+        // 大きさと倍率は同じ trait から取る (現在の設定の出所を揃える)
+        let traits = UITraitCollection.current
+        let scale = UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: 100, compatibleWith: traits) / 100
+        return UIFont.preferredFont(forTextStyle: uiStyle, compatibleWith: traits).pointSize / scale
     }
 
     private static func uiStyle(_ style: Font.TextStyle) -> UIFont.TextStyle {

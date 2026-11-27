@@ -6,8 +6,8 @@ struct TVReadingText: View {
     let text: String
     var font: Font = .body
     var lineSpacing: CGFloat = 12
-    /// `DenpaFont` は端末の字の設定で拡大する (`Design/Font.swift`)。拡大する画面では塊を小さくする。
-    /// `system` の固定の字の画面は拡大しないので false のまま
+    /// 文字の大きさの設定で拡大する画面では塊を小さくする。
+    /// 固定の大きさの字の画面は拡大しないので false のまま
     var scalesWithTextSize = false
 
     @ScaledMetric(relativeTo: .body) private var textScale: CGFloat = 1
