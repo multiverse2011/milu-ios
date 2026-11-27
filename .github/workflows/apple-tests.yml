@@ -1,4 +1,4 @@
-name: Apple プラットフォームのテストとビルド
+name: Apple プラットフォームの単体テスト
 
 on:
   pull_request:
@@ -47,10 +47,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-  tvos-build:
-    name: tvOS のビルド
+  tvos-tests:
+    name: tvOS の単体テスト
     runs-on: xcode-27
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,19 +63,19 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate
-      - name: Apple TV シミュレータ向けにビルドする
+      - name: Apple TV 4K で単体テストを実行する
         run: |
           mkdir -p DerivedData/results
-          xcodebuild build -project Milu.xcodeproj -scheme Milu \
-            -destination 'generic/platform=tvOS Simulator' \
-            -derivedDataPath ../dd-ci \
+          xcodebuild test -project Milu.xcodeproj -scheme Milu \
+            -destination 'platform=tvOS Simulator,name=Apple TV 4K (4th generation),OS=27.2' \
+            -derivedDataPath DerivedData/tvos \
             -resultBundlePath DerivedData/results/Milu-tvOS.xcresult \
-            CODE_SIGNING_ALLOWED=NO
-      - name: 失敗時のビルド結果を保存する
+            CODE_SIGN_IDENTITY=-
+      - name: 失敗時のテスト結果を保存する
         if: failure()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: milu-tvos-build-results
+          name: milu-tvos-test-results
           path: DerivedData/results/
           if-no-files-found: ignore
           retention-days: 3
