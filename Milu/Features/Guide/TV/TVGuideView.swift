@@ -719,9 +719,10 @@ private struct TVGuideBoard: View {
         } else {
             time = GuideLayout.broadcastRange(for: day).from
         }
-        loadedCenterDay = day
         Task {
+            // 読みが採用されたときだけ、その日を先読み済みにして飛ぶ
             if await model.tvReload(center: day) {
+                loadedCenterDay = day
                 jump(to: time)
             }
         }
@@ -733,8 +734,11 @@ private struct TVGuideBoard: View {
         let now = Date()
         let center = cursorDay(now: now) ?? model.selectedDay
         model.tvSelectType(type)
-        loadedCenterDay = center
-        Task { await model.tvReload(center: center) }
+        Task {
+            if await model.tvReload(center: center) {
+                loadedCenterDay = center
+            }
+        }
     }
 
     /// 指定の時刻へ即座に飛ぶ (チップを選んだとき)。いまの列のまま、その時刻が上から 1/4 に来る所へ

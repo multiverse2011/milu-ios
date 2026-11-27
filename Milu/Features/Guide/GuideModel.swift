@@ -61,12 +61,18 @@ final class GuideModel: ProgramSheetModel {
     private(set) var tvDidFail = false
     private var tvResponses: [Int64: GuideResponse] = [:]
     private var tvGeneration = 0
-    /// 最後に読みにいったカーソルの放送日 (SSE の読み直しに使う)
+    /// 最後に表に採用したカーソルの放送日 (SSE の読み直しに使う)
     private var tvCenter: Date?
-    /// 読み込み中の中心の日と本数 (同じ日の読みを重ねない)
-    private var tvLoadingCenter: Date?
-    private var tvLoadingCount = 0
+    /// 読み込み中の (中心の日, 種別)。同じ読みを重ねない
+    private var tvLoading: [TVLoading] = []
     private var isTVGuide = false
+
+    private struct TVLoading: Equatable {
+        /// 同じ (日, 種別) の読みが重なっても、自分の後始末だけを消せるようにする
+        let token: UUID
+        let center: Date
+        let type: ServiceType
+    }
 
     init(app: AppModel, now: Date = Date()) {
         self.app = app
@@ -188,8 +194,10 @@ final class GuideModel: ProgramSheetModel {
         guard type != selectedType else { return }
         selectedType = type
         tvResponses = [:]
-        // 読み込み中の旧い種別の応答を捨てる
+        // 読み込み中の旧い種別の応答を捨てる。走っている読みも dedupe の相手にしない
+        // (種別を戻したときに、捨てるはずの読みへ吸われないように)
         tvGeneration += 1
+        tvLoading.removeAll()
     }
 
     /// カーソルの放送日 (`center`) の前後 1 日ずつを、開いた日〜チップの最後の日の範囲で読み、
@@ -198,22 +206,22 @@ final class GuideModel: ProgramSheetModel {
     /// 中心が読めなかったときは今の表を差し替えない。適用したら `true` を返す
     @discardableResult
     func tvReload(center: Date, now: Date = Date(), force: Bool = false) async -> Bool {
-        // 同じ日の読みが走っているなら重ねない (端の再試行で走っている読みを打ち切らない)
-        if !force, tvLoadingCount > 0, let loading = tvLoadingCenter,
-           GuideLayout.calendar.isDate(loading, inSameDayAs: center) {
+        // 同じ日・同じ種別の読みが走っているなら重ねない (端の再試行で走っている読みを打ち切らない)。
+        // 種別が変わっていれば別の読みなので、前の読みに飲まれずに読む
+        if !force, tvLoading.contains(where: {
+            GuideLayout.calendar.isDate($0.center, inSameDayAs: center) && $0.type == selectedType
+        }) {
             return false
         }
-        tvLoadingCount += 1
-        tvLoadingCenter = center
+        let loading = TVLoading(token: UUID(), center: center, type: selectedType)
+        tvLoading.append(loading)
         defer {
-            tvLoadingCount -= 1
-            if tvLoadingCount == 0 { tvLoadingCenter = nil }
+            if let index = tvLoading.firstIndex(of: loading) { tvLoading.remove(at: index) }
         }
         tvGeneration += 1
         let generation = tvGeneration
         isTVGuide = true
         if tvBase == nil { tvBase = center }
-        tvCenter = center
         do {
             try await loadTypesIfNeeded()
         } catch {
@@ -241,8 +249,12 @@ final class GuideModel: ProgramSheetModel {
             }
         }
         guard generation == tvGeneration else { return false }
-        // 中心 (カーソルの日) が読めていないなら、いまの表をそのまま使う (1 日ぶん飛ばさない)
-        guard tvResponses[key(center)] != nil || tvGuide == nil else { return false }
+        // 中心 (カーソルの日) が読めていないなら、いまの表をそのまま使う (1 日ぶん飛ばさない)。
+        // まだ表が無い (初回) なら、別の日から始めずに失敗として出す
+        if tvResponses[key(center)] == nil {
+            if tvGuide == nil { tvDidFail = true }
+            return false
+        }
         let keys = Set(days.map { key($0) })
         tvResponses = tvResponses.filter { keys.contains($0.key) }
         // 途中に読めなかった日があれば、そこまでをつなぐ (間に空白を挟まない)
@@ -250,6 +262,8 @@ final class GuideModel: ProgramSheetModel {
         tvDays = Array(loaded)
         tvGuide = tvDays.isEmpty ? nil : Self.merge(tvDays.compactMap { tvResponses[key($0)] })
         tvDidFail = failed && tvGuide == nil
+        // 採用した表の中心を覚える (追い越されて捨てられた読みでは動かさない)
+        tvCenter = center
         return true
     }
 
