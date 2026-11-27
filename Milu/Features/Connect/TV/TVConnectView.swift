@@ -3,7 +3,6 @@ import SwiftUI
 /// tvOS の繋ぐ画面 (TV-Connect)。絵に無い失敗の行は iPhone と同じ場所に出す。
 struct TVConnectView: View {
     @Environment(AppModel.self) private var model
-    @FocusState private var addressFocused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -23,28 +22,15 @@ struct TVConnectView: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(6)
 
+                // 地・枠・拡大は tvOS の標準の TextField に任せる
                 HStack(spacing: 24) {
                     Text("アドレス")
                         .fontWeight(.medium)
-                        .foregroundStyle(TVTheme.fieldLabel)
                     TextField("denpa.lan", text: $model.address)
                         .textFieldStyle(.plain)
                         .font(.system(size: 34, weight: .semibold))
-                        .focused($addressFocused)
-                        .focusEffectDisabled()
                         .onSubmit { connect() }
                 }
-                .foregroundStyle(TVTheme.ink)
-                .padding(.horizontal, 34)
-                .frame(height: 96)
-                .background(TVTheme.light, in: RoundedRectangle(cornerRadius: 20))
-                .overlay {
-                    if addressFocused {
-                        RoundedRectangle(cornerRadius: 20)
-                            .strokeBorder(Color.accentColor, lineWidth: 5)
-                    }
-                }
-                .scaleEffect(addressFocused ? 1.03 : 1)
                 .padding(.top, 22)
 
                 Group {

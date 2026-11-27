@@ -9,8 +9,6 @@ enum TVTheme {
     static let light = Color(red: 242 / 255, green: 244 / 255, blue: 248 / 255)
     /// 白い地に載せる字
     static let ink = Color(red: 11 / 255, green: 12 / 255, blue: 15 / 255)
-    /// 白い地の入力欄の見出し
-    static let fieldLabel = Color(red: 59 / 255, green: 65 / 255, blue: 80 / 255)
     /// QR の下に敷く字
     static let qrInk = Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255)
     /// 地に載せる本文
