@@ -27,9 +27,10 @@ struct TVRecordingPlayerView: View {
     @FocusState private var surfaceFocused: Bool
     @FocusState private var control: Control?
 
-    /// 操作の列のフォーカスの的。選ぶものは項目ごとの 1 つのメニューに当てる
+    /// 操作の列のフォーカスの的。選択肢が多いものは項目ごとの 1 つのメニュー、
+    /// オン/オフだけのものは切り替えボタンに当てる
     private enum Control: Hashable {
-        case playPause, nextChapter, latest, speed, quality, captions, audio
+        case playPause, nextChapter, latest, speed, quality, captions, cmSkip, audio
     }
 
     var body: some View {
@@ -309,7 +310,8 @@ struct TVRecordingPlayerView: View {
     }
 
     private var pillRow: some View {
-        HStack(spacing: 16) {
+        // 7 個になっても 1 行に収まるよう、間を 12 にする (下に幅の見積り)
+        HStack(spacing: 12) {
             // 動かす (選ばない) ものはボタンのまま
             pill(session.isPlaying ? "一時停止" : "再生", tag: .playPause) {
                 session.togglePlayCommand()
@@ -327,10 +329,11 @@ struct TVRecordingPlayerView: View {
                 }
             }
 
-            // 選ぶものは項目ごとに 1 つのメニューにし、値を押すたびに回す札をやめる
+            // 選択肢が多いものは項目ごとのメニュー、オン/オフだけのものは切り替えボタン
             speedMenu
             qualityMenu
-            captionsMenu
+            captionsButton
+            cmSkipButton
             audioMenu
         }
         .controlSize(.large)
@@ -404,53 +407,40 @@ struct TVRecordingPlayerView: View {
             : item.title
     }
 
-    /// 字幕と CM 飛ばしのメニュー。どちらも入り切りだけなので、オン・オフの選択肢を
-    /// 並べて 1 つのメニューにまとめる
+    /// 字幕のボタン。オン/オフの 2 択だけなのでメニューにせず、押すたびに切り替える。
+    /// 形とスタイルは状態で変えない (押した直後に焦点が隣のボタンへ移るため)
     @ViewBuilder
-    private var captionsMenu: some View {
-        let showsCaptions = session.hasCaptions
-        let showsCM = !session.isChase
-        if showsCaptions || showsCM {
-            let captions = session.captionsOn ? String(localized: "オン") : String(localized: "オフ")
-            let cm = session.cmSkipEnabled ? String(localized: "オン") : String(localized: "オフ")
-            // 両方まとめたときは、どちらの状態も外から分かるようにする。
-            // 値は状態だけ (「オン・オン」)。CM は題「字幕・CM」が示す
-            let showsBoth = showsCaptions && showsCM
-            let name: LocalizedStringKey = showsBoth ? "字幕・CM" : (showsCaptions ? "字幕" : "CM 飛ばし")
-            let value = showsBoth ? "\(captions)・\(cm)" : (showsCaptions ? captions : cm)
-            // 読み上げは、どちらの状態かが分かるよう項目名を添える。
-            // 区切りは英語でも読めるように ASCII のカンマにする
-            let spoken = showsBoth
-                ? "\(String(localized: "字幕")) \(captions), \(String(localized: "CM 飛ばし")) \(cm)"
-                : value
-            Menu {
-                if showsCaptions {
-                    Section("字幕") {
-                        TVMenuOption(title: String(localized: "オン"), selected: session.captionsOn) {
-                            session.setCaptionsOn(true)
-                        }
-                        TVMenuOption(title: String(localized: "オフ"), selected: !session.captionsOn) {
-                            session.setCaptionsOn(false)
-                        }
-                    }
-                }
-                if showsCM {
-                    Section("CM 飛ばし") {
-                        TVMenuOption(title: String(localized: "オン"), selected: session.cmSkipEnabled) {
-                            session.setCmSkip(true)
-                        }
-                        TVMenuOption(title: String(localized: "オフ"), selected: !session.cmSkipEnabled) {
-                            session.setCmSkip(false)
-                        }
-                    }
-                }
+    private var captionsButton: some View {
+        if session.hasCaptions {
+            let on = session.captionsOn
+            let value = on ? String(localized: "オン") : String(localized: "オフ")
+            Button {
+                session.setCaptionsOn(!on)
             } label: {
-                TVMenuLabel(name: name, value: value)
+                TVMenuLabel(name: "字幕", value: value)
             }
             .buttonStyle(.bordered)
             .focused($control, equals: .captions)
-            .accessibilityLabel(Text(name))
-            .accessibilityValue(Text(spoken))
+            .accessibilityLabel(Text("字幕"))
+            .accessibilityValue(Text(value))
+        }
+    }
+
+    /// CM 飛ばしのボタン。字幕と同じく入り切りだけなので、押すたびに切り替える
+    @ViewBuilder
+    private var cmSkipButton: some View {
+        if !session.isChase {
+            let on = session.cmSkipEnabled
+            let value = on ? String(localized: "オン") : String(localized: "オフ")
+            Button {
+                session.setCmSkip(!on)
+            } label: {
+                TVMenuLabel(name: "CM 飛ばし", value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($control, equals: .cmSkip)
+            .accessibilityLabel(Text("CM 飛ばし"))
+            .accessibilityValue(Text(value))
         }
     }
 

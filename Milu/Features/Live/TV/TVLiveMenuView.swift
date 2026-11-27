@@ -74,10 +74,10 @@ struct TVLiveMenuView: View {
     private var controls: some View {
         let session = model.session
         return HStack(spacing: 18) {
-            // 選ぶもの (画質・解像度・字幕・音声) は項目ごとに 1 つのメニューにし、
-            // 値を押すたびに回す札をやめる。選ぶのでない録画だけボタンのまま
+            // 選択肢が多いもの (画質・解像度・音声) は項目ごとに 1 つのメニュー、
+            // オン/オフだけの字幕は押すたびに切り替わるボタンにする。録画は動かすボタン
             qualityMenu(session)
-            captionsMenu(session)
+            captionsButton(session)
             audioMenu(session)
             if let now = model.current?.now {
                 let recording = now.reserved || now.recording
@@ -146,20 +146,15 @@ struct TVLiveMenuView: View {
         return "\(quality)・\(rung)"
     }
 
-    /// 字幕のメニュー。オン/オフだけなので、選択肢 (オン・オフ) を並べて
-    /// いまのものにチェックを付ける (純正の字幕のメニューと同じ)
+    /// 字幕のボタン。オン/オフの 2 択だけなのでメニューにせず、押すたびに切り替える。
+    /// 形とスタイルは状態で変えない (押した直後に焦点が隣のボタンへ移るため)
     @ViewBuilder
-    private func captionsMenu(_ session: PlaybackSession?) -> some View {
+    private func captionsButton(_ session: PlaybackSession?) -> some View {
         if session?.hasCaptions == true {
             let on = session?.captionsOn == true
             let value = on ? String(localized: "オン") : String(localized: "オフ")
-            Menu {
-                TVMenuOption(title: String(localized: "オン"), selected: on) {
-                    model.setCaptionsOn(true)
-                }
-                TVMenuOption(title: String(localized: "オフ"), selected: !on) {
-                    model.setCaptionsOn(false)
-                }
+            Button {
+                model.setCaptionsOn(!on)
             } label: {
                 TVMenuLabel(name: "字幕", value: value)
             }

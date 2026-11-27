@@ -3133,16 +3133,6 @@
         }
       }
     },
-    "字幕・CM" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subtitles & Ads"
-          }
-        }
-      }
-    },
     "自動 (%@)" : {
       "localizations" : {
         "en" : {
