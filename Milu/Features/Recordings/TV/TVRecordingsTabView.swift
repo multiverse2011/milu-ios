@@ -9,6 +9,9 @@ struct TVRecordingsTabView: View {
     @Environment(AppModel.self) private var app
     @State private var model = RecordingsModel()
     @FocusState private var focused: Int64?
+    /// 長押しメニューにフォーカスが移っている間は `focused` が nil になる。上部の情報と、詳細を
+    /// 閉じたときの戻り先に使う「最後にフォーカスした録画」
+    @State private var lastFocused: Int64?
     @State private var cover: Cover?
     @State private var alertMessage: String?
 
@@ -33,13 +36,18 @@ struct TVRecordingsTabView: View {
         }
         .task { await model.start(app) }
         .onDisappear { model.stop() }
-        .fullScreenCover(item: $cover) { cover in
+        .onChange(of: focused) { _, id in
+            if let id { lastFocused = id }
+        }
+        .fullScreenCover(item: $cover, onDismiss: restoreFocus) { cover in
             switch cover {
             case .detail(let recording):
                 TVRecordingDetailView(
                     recording: recording,
                     onPlay: { from in open(recording, from: from) },
                     onDelete: {
+                        // 消した録画へは戻らない。焦点は先頭 (tvOS の既定) に任せる
+                        lastFocused = nil
                         self.cover = nil
                         Task { await delete(recording) }
                     },
@@ -237,7 +245,18 @@ struct TVRecordingsTabView: View {
     // MARK: - 決まり
 
     private var hero: Recording? {
-        model.visible.first { $0.id == focused } ?? model.visible.first
+        model.visible.first { $0.id == lastFocused } ?? model.visible.first
+    }
+
+    /// 長押しメニューから詳細を開くと、閉じたときに焦点が既定の先頭へ落ちる。最後にフォーカスした
+    /// カードへ戻す。消えた録画なら何もしない (先頭に任せる)
+    private func restoreFocus() {
+        guard let id = lastFocused else { return }
+        guard model.visible.contains(where: { $0.id == id }) else {
+            lastFocused = nil
+            return
+        }
+        focused = id
     }
 
     /// 絵の右上の暖かい光
