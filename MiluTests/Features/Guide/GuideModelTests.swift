@@ -388,6 +388,62 @@ import Testing
         #expect(model.tvDays == [day])
     }
 
+    @Test func tvStartWithOnlyOpenDayMissingShowsFailure() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let failures = Box<Set<Int64>>([GuideLayout.broadcastRange(for: day).from])
+        let (model, _, _) = fixture(tvTransport(fails: { failures.value.contains($0) }), now: now)
+        await model.tvStart(now: now)
+        // 開いた日が読めない初回は、翌日から始めずに失敗として出す
+        #expect(model.tvGuide == nil)
+        #expect(model.tvDidFail)
+    }
+
+    @Test func tvSelectTypeReloadsWhileSameDayIsLoading() async throws {
+        let now = fixedNow()
+        let day = GuideLayout.broadcastDay(for: now)
+        let gate = Gate()
+        let started = Box(false)
+        // 最初の GR の読みを止めて、その間に種別を切り替える
+        let stub = StubTransport { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("api/services") {
+                return reply(request, 200, self.servicesJSON)
+            }
+            let query = request.url?.query ?? ""
+            guard let typePart = query.split(separator: "&").first(where: { $0.hasPrefix("type=") }),
+                  let fromPart = query.split(separator: "&").first(where: { $0.hasPrefix("from=") }),
+                  let from = Int64(fromPart.dropFirst(5)),
+                  let toPart = query.split(separator: "&").first(where: { $0.hasPrefix("to=") }),
+                  let to = Int64(toPart.dropFirst(3))
+            else { throw URLError(.badURL) }
+            let type = String(typePart.dropFirst(5))
+            if type == "GR", !started.value {
+                started.value = true
+                await gate.wait()
+            }
+            let body = """
+            {"type":"\(type)","from":\(from),"to":\(to),"until":null,"services":[
+              {"id":1,"name":"局","mainId":null,"remoteControlKey":null,"logo":null,
+               "programs":[{"id":\(from),"name":"番組","startAt":\(from),"endAt":\(from + 3600000),
+                 "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null}]}]}
+            """
+            return reply(request, 200, body)
+        }
+        let (model, _, _) = fixture(stub, now: now)
+        let loading = Task { await model.tvReload(center: day, now: now) }
+        while !started.value { await Task.yield() }
+        model.tvSelectType(.CS)
+        let applied = await model.tvReload(center: day, now: now)
+        #expect(applied)
+        await gate.open()
+        _ = await loading.value
+        // 新しい種別の表が読まれていること (前の種別の読みに飲まれない)
+        #expect(model.selectedType == .CS)
+        #expect(model.tvGuide?.type == .CS)
+        #expect(model.tvGuide?.services.first?.programs.isEmpty == false)
+    }
+
     private func fixedNow() -> Date {
         GuideLayout.calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 15))!
     }
@@ -423,5 +479,22 @@ import Testing
             """
             return reply(request, 200, body)
         }
+    }
+}
+
+/// テスト用の待ち合わせ。`open()` まで `wait()` を止める
+private actor Gate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var opened = false
+
+    func wait() async {
+        if opened { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        opened = true
+        waiters.forEach { $0.resume() }
+        waiters = []
     }
 }
