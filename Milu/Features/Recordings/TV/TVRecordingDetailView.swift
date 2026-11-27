@@ -74,14 +74,14 @@ struct TVRecordingDetailView: View {
         HStack(spacing: 16) {
             TVChannelLogo(name: recording.serviceName)
             Text("\(recording.serviceName) · \(dateRange) · \(length)")
-                .font(.system(size: 28))
+                .font(.body)
                 .foregroundStyle(TVTheme.body)
         }
     }
 
     private var title: some View {
         Text(recording.title)
-            .font(DenpaFont.font(size: 60))
+            .font(DenpaFont.font(.title))
             .fontWeight(.bold)
             .lineLimit(3)
             .padding(.top, 16)
@@ -99,7 +99,7 @@ struct TVRecordingDetailView: View {
             }
             .frame(width: 520, height: 8)
             Text(text)
-                .font(.system(size: 26))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
         }
         .padding(.top, 22)
@@ -117,7 +117,7 @@ struct TVRecordingDetailView: View {
 
     private func chip(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 24))
+            .font(.callout)
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
             .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
@@ -146,7 +146,6 @@ struct TVRecordingDetailView: View {
             Button("閉じる", action: onClose)
                 .buttonStyle(.bordered)
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
         .padding(.top, 36)
@@ -162,7 +161,7 @@ struct TVRecordingDetailView: View {
         if let detail {
             if !detail.description.isEmpty {
                 TVReadingText(
-                    text: detail.description, font: DenpaFont.font(size: 30),
+                    text: detail.description, font: DenpaFont.font(.body),
                     lineSpacing: 10, scalesWithTextSize: true
                 )
                     .foregroundStyle(TVTheme.body)
@@ -170,11 +169,11 @@ struct TVRecordingDetailView: View {
             }
             ForEach(GuideText.extendedItems(detail.extended), id: \.heading) { item in
                 Text(GuideText.extendedHeading(item.heading))
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(TVTheme.body)
                     .padding(.top, 28)
                 TVReadingText(
-                    text: item.body, font: DenpaFont.font(size: 30),
+                    text: item.body, font: DenpaFont.font(.body),
                     lineSpacing: 10, scalesWithTextSize: true
                 )
                     .foregroundStyle(TVTheme.body)

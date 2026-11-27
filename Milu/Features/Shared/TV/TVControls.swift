@@ -6,6 +6,7 @@ struct TVChannelLogo: View {
 
     var body: some View {
         Text(String(name.prefix(1)))
+            // ロゴの枠 (70×40) に合わせて決まる字なので、枠の大きさに合わせる
             .font(.system(size: 20, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 70, height: 40)

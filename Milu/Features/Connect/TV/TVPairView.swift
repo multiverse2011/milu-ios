@@ -17,17 +17,17 @@ struct TVPairView: View {
                 qrCode
                 VStack(alignment: .leading, spacing: 22) {
                     Text("この Apple TV を許可する")
-                        .font(.system(size: 60, weight: .bold))
+                        .font(.largeTitle.bold())
                     Text("\(host) はログインが要ります。\nスマホで QR を読み取り、denpa にログインして、\n出てきた画面でコードが同じことを確かめて許可してください。")
-                        .font(.system(size: 30))
+                        .font(.title3)
                         .foregroundStyle(TVTheme.body)
                         .lineSpacing(6)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("コード")
-                            .font(.system(size: 26))
+                            .font(.callout)
                             .foregroundStyle(TVTheme.muted)
                         Text(pairing.code?.userCode ?? "---- ----")
-                            .font(.system(size: 92, weight: .bold, design: .monospaced))
+                            .font(.system(.largeTitle, design: .monospaced).bold())
                             .tracking(8)
                     }
                     .padding(.top, 14)
@@ -39,7 +39,7 @@ struct TVPairView: View {
                         Text(pairing.error ?? String(localized: "許可を待っています"))
                             .foregroundStyle(pairing.error == nil ? TVTheme.muted : .orange)
                     }
-                    .font(.system(size: 28))
+                    .font(.body)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -50,7 +50,6 @@ struct TVPairView: View {
 
             // 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)
             Button("接続先を変える") { onBack?() }
-                .font(.system(size: 28, weight: .semibold))
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .padding(.bottom, 110)
@@ -75,7 +74,7 @@ struct TVPairView: View {
                     .padding(24)
             } else {
                 Text("QR コード")
-                    .font(.system(size: 32, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(TVTheme.qrInk)
             }
         }

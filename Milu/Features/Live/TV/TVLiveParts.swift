@@ -37,6 +37,7 @@ struct TVServiceLogo: View {
                     .scaledToFill()
             } else {
                 Text(String(service.name.prefix(1)))
+                    // ロゴの枠 (70×40) に合わせて決まる字なので、枠の高さから出す
                     .font(.system(size: height * 0.5, weight: .bold))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white.opacity(0.14))
@@ -85,25 +86,25 @@ struct TVServiceHeader: View {
                     HStack(spacing: 14) {
                         if let key = service.remoteControlKey {
                             Text("\(key)")
-                                .font(.system(size: 28, weight: .medium))
+                                .font(.body.weight(.medium))
                                 .foregroundStyle(TVTheme.muted)
                         }
                         Text(service.name)
-                            .font(.system(size: 28, weight: .semibold))
+                            .font(.headline)
                         if let quality {
                             Text(quality)
-                                .font(.system(size: 28))
+                                .font(.body)
                                 .foregroundStyle(TVTheme.muted)
                         }
                     }
                     HStack(spacing: 14) {
                         Text(service.now?.title ?? "")
-                            .font(DenpaFont.font(size: 28))
+                            .font(DenpaFont.font(.body))
                             .fontWeight(.bold)
                             .foregroundStyle(TVTheme.body)
                             .lineLimit(1)
                         Text(TVLiveText.remaining(service.now, now: context.date))
-                            .font(.system(size: 28))
+                            .font(.body)
                             .foregroundStyle(TVTheme.muted)
                     }
                 }

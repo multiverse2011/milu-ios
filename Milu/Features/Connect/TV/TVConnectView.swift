@@ -14,10 +14,10 @@ struct TVConnectView: View {
                     .frame(width: 130, height: 130)
                     .clipShape(RoundedRectangle(cornerRadius: 30))
                 Text("denpa に繋ぐ")
-                    .font(.system(size: 64, weight: .bold))
+                    .font(.largeTitle.bold())
                     .padding(.top, 4)
                 Text("家の denpa の Web 画面を開くときのアドレスを入れてください。\niPhone のキーボードからも打てます。")
-                    .font(.system(size: 30))
+                    .font(.title3)
                     .foregroundStyle(TVTheme.muted)
                     .multilineTextAlignment(.center)
                     .lineSpacing(6)
@@ -25,9 +25,11 @@ struct TVConnectView: View {
                 // 地・枠・拡大は tvOS の TextField の既定の見た目に任せる
                 HStack(spacing: 24) {
                     Text("アドレス")
+                        .font(.title3)
                         .fontWeight(.medium)
                     TextField("denpa.lan", text: $model.address)
-                        .font(.system(size: 34, weight: .semibold))
+                        .font(.title3)
+                        .fontWeight(.semibold)
                         .onSubmit { connect() }
                 }
                 .padding(.top, 22)
@@ -41,7 +43,7 @@ struct TVConnectView: View {
                             .foregroundStyle(TVTheme.muted)
                     }
                 }
-                .font(.system(size: 24))
+                .font(.callout)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 34)
 
@@ -54,7 +56,6 @@ struct TVConnectView: View {
                             Text("繋ぐ")
                         }
                     }
-                    .font(.system(size: 32, weight: .semibold))
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -67,7 +68,7 @@ struct TVConnectView: View {
             .padding(.top, 190)
 
             Text("Milu は denpa の非公式クライアントです。")
-                .font(.system(size: 24))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
                 .padding(.bottom, 60)
         }

@@ -33,7 +33,7 @@ struct TVLiveDetailView: View {
             }
             // 画面案の下端の案内
             Text("▼ 下キーで続き")
-                .font(.system(size: 24))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
                 .padding(.bottom, 50)
         }
@@ -45,11 +45,11 @@ struct TVLiveDetailView: View {
             HStack(spacing: 16) {
                 TVServiceLogo(service: service, baseURL: baseURL, token: token)
                 Text(headerText)
-                    .font(.system(size: 28))
+                    .font(.body)
                     .foregroundStyle(TVTheme.body)
             }
             Text(service.now?.title ?? "")
-                .font(DenpaFont.font(size: 60))
+                .font(DenpaFont.font(.title))
                 .fontWeight(.bold)
                 .lineSpacing(6)
                 .padding(.top, 16)
@@ -57,7 +57,7 @@ struct TVLiveDetailView: View {
                 TVProgressBar(value: TVLiveText.progress(service.now, now: now), height: 8)
                     .frame(width: 520)
                 Text(TVLiveText.remaining(service.now, now: now))
-                    .font(.system(size: 26))
+                    .font(.callout)
                     .foregroundStyle(TVTheme.muted)
             }
             .padding(.top, 22)
@@ -65,7 +65,7 @@ struct TVLiveDetailView: View {
             buttons.padding(.top, 36)
             if let description = detail?.description, !description.isEmpty {
                 Text(description)
-                    .font(DenpaFont.font(size: 30))
+                    .font(DenpaFont.font(.body))
                     .lineSpacing(12)
                     .foregroundStyle(TVTheme.body)
                     .frame(maxWidth: 1340, alignment: .leading)
@@ -73,11 +73,11 @@ struct TVLiveDetailView: View {
             }
             ForEach(Array(extendedItems.enumerated()), id: \.offset) { _, item in
                 Text(GuideText.extendedHeading(item.heading))
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(TVTheme.body)
                     .padding(.top, 28)
                 Text(item.body)
-                    .font(DenpaFont.font(size: 30))
+                    .font(DenpaFont.font(.body))
                     .lineSpacing(12)
                     .foregroundStyle(TVTheme.body)
                     .frame(maxWidth: 1340, alignment: .leading)
@@ -99,7 +99,7 @@ struct TVLiveDetailView: View {
         HStack(spacing: 12) {
             ForEach(chipTitles, id: \.self) { title in
                 Text(title)
-                    .font(.system(size: 24))
+                    .font(.callout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 4)
                     .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
@@ -137,7 +137,6 @@ struct TVLiveDetailView: View {
                 .buttonStyle(.bordered)
                 .focused($focus, equals: .detailClose)
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
     }

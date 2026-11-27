@@ -38,7 +38,7 @@ struct TVLiveTabView: View {
                 }
             case .empty:
                 Text("視聴できる放送局がありません")
-                    .font(.system(size: 32))
+                    .font(.title3)
                     .foregroundStyle(TVTheme.muted)
             case .ready:
                 TVLiveMenuView(

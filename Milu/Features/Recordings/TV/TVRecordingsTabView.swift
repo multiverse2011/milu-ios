@@ -137,22 +137,22 @@ struct TVRecordingsTabView: View {
                     }
                     .padding(.leading, 8)
                 }
-                .font(.system(size: 26))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
 
                 HStack(spacing: 16) {
                     unseenDot(recording, size: 24)
                     Text(recording.title)
-                        .font(DenpaFont.font(size: 56))
+                        .font(DenpaFont.font(.title))
                         .fontWeight(.bold)
                         .lineLimit(2)
                 }
                 Text(metaLine(recording))
-                    .font(.system(size: 30))
+                    .font(.title3)
                     .foregroundStyle(Color(white: 0.92).opacity(0.86))
                 if recording.recording {
                     Text("● 録画中")
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.callout.bold())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
@@ -169,10 +169,10 @@ struct TVRecordingsTabView: View {
                 .font(.system(size: 110, weight: .light))
                 .foregroundStyle(TVTheme.muted)
             Text("録画はまだありません")
-                .font(.system(size: 48, weight: .bold))
+                .font(.title.bold())
                 .padding(.top, 10)
             Text("番組表で番組を予約すると、録れたものがここに並びます。")
-                .font(.system(size: 30))
+                .font(.title3)
                 .foregroundStyle(TVTheme.muted)
             Button("ライブへ", action: onGoLive)
                 .buttonStyle(.borderedProminent)
@@ -189,7 +189,7 @@ struct TVRecordingsTabView: View {
             Text(heading.secondary)
                 .foregroundStyle(TVTheme.muted)
         }
-        .font(.system(size: 28))
+        .font(.body)
         .foregroundStyle(Color(white: 0.92).opacity(0.86))
     }
 
@@ -332,7 +332,7 @@ struct TVRecordingCard: View {
                 )
                 if recording {
                     Text("● 録画中")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.caption.bold())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
@@ -352,13 +352,13 @@ struct TVRecordingCard: View {
                     .frame(width: 16, height: 16)
                     .opacity(unseen ? 1 : 0)
                 Text(title)
-                    .font(DenpaFont.font(size: 34))
+                    .font(DenpaFont.font(.title3))
                     .fontWeight(.bold)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }
             Text(meta)
-                .font(.system(size: 26))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
         }
         .frame(width: 510, alignment: .leading)
@@ -437,10 +437,10 @@ struct TVOfflineView: View {
                 .font(.system(size: 96, weight: .light))
                 .foregroundStyle(TVTheme.muted)
             Text("denpa に接続できません")
-                .font(.system(size: 40, weight: .bold))
+                .font(.title2.bold())
                 .padding(.top, 8)
             Text("Wi-Fi などの接続状況を確認してください。")
-                .font(.system(size: 28))
+                .font(.body)
                 .foregroundStyle(TVTheme.muted)
             Button("再試行", action: retry)
                 .buttonStyle(.borderedProminent)

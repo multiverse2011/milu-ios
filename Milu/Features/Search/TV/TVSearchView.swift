@@ -157,7 +157,7 @@ struct TVSearchView: View {
 
     private func heading(_ title: LocalizedStringKey) -> some View {
         Text(title)
-            .font(.system(size: 28))
+            .font(.body)
             .foregroundStyle(Color(white: 0.92).opacity(0.86))
     }
 
@@ -165,7 +165,7 @@ struct TVSearchView: View {
         Group {
             if more {
                 Text("ほかにもあります。言葉を足すと絞り込めます。")
-                    .font(.system(size: 24))
+                    .font(.callout)
                     .foregroundStyle(TVTheme.muted)
             }
         }
@@ -198,16 +198,16 @@ struct TVSearchView: View {
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(text.day) \(text.time) · \(program.serviceName)")
-                    .font(.system(size: 24))
+                    .font(.callout)
                     .foregroundStyle(TVTheme.muted)
                 Text(program.name)
-                    .font(DenpaFont.font(size: 30))
+                    .font(DenpaFont.font(.body))
                     .fontWeight(.bold)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 if let state = text.state {
                     Text(state.text())
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.callout.bold())
                         .foregroundStyle(state == .onAir ? TVTheme.record : Color.accentColor)
                 }
             }

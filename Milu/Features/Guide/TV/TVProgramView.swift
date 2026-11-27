@@ -33,7 +33,7 @@ struct TVProgramView: View {
             VStack(alignment: .leading, spacing: 0) {
                 headerRow
                 Text(item.name)
-                    .font(DenpaFont.font(size: 60))
+                    .font(DenpaFont.font(.title))
                     .bold()
                     .lineSpacing(4)
                     .padding(.top, 16)
@@ -48,13 +48,13 @@ struct TVProgramView: View {
                     .padding(.top, 36)
                 if let status = statusLine {
                     Text(status.text)
-                        .font(.system(size: 26))
+                        .font(.callout)
                         .foregroundStyle(status.color)
                         .padding(.top, 22)
                 }
                 if let description = detail?.description ?? item.description, !description.isEmpty {
                     TVReadingText(
-                        text: description, font: DenpaFont.font(size: 30),
+                        text: description, font: DenpaFont.font(.body),
                         lineSpacing: 12, scalesWithTextSize: true
                     )
                         .foregroundStyle(TVTheme.body)
@@ -104,7 +104,7 @@ struct TVProgramView: View {
         HStack(spacing: 16) {
             ChannelLogoView(path: item.logo, serviceName: item.serviceName, width: 70, height: 40)
             Text(headerText)
-                .font(.system(size: 28))
+                .font(.body)
                 .foregroundStyle(TVTheme.body)
         }
     }
@@ -176,7 +176,6 @@ struct TVProgramView: View {
                 .buttonStyle(.bordered)
                 .focused($focusedButton, equals: actions.buttons.count)
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .defaultFocus($focusedButton, 0)
         // 予約→予約取消、録画する→録画中で枝が入れ替わるとフォーカスが外れるので、
@@ -226,10 +225,10 @@ struct TVProgramView: View {
         ForEach(Array(otherSections.enumerated()), id: \.offset) { _, entry in
             VStack(alignment: .leading, spacing: 6) {
                 Text(GuideText.extendedHeading(entry.heading))
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(TVTheme.body)
                 TVReadingText(
-                    text: entry.body, font: DenpaFont.font(size: 30),
+                    text: entry.body, font: DenpaFont.font(.body),
                     lineSpacing: 12, scalesWithTextSize: true
                 )
                     .foregroundStyle(TVTheme.body)
@@ -355,7 +354,7 @@ private struct TVPill<Content: View>: View {
 
     var body: some View {
         content
-            .font(.system(size: 24, weight: bold ? .bold : .regular))
+            .font(.callout.weight(bold ? .bold : .regular))
             .foregroundStyle(foreground)
             .padding(.horizontal, 14)
             .frame(height: 44)

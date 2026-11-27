@@ -75,7 +75,7 @@ struct TVLiveMenuView: View {
         let session = model.session
         return HStack(spacing: 18) {
             Text("画質")
-                .font(.system(size: 22))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
             ForEach(Array((session?.qualityItems ?? []).enumerated()), id: \.offset) { index, item in
                 chip(
@@ -88,7 +88,7 @@ struct TVLiveMenuView: View {
             }
             if session?.rungItems.isEmpty == false {
                 Text("解像度")
-                    .font(.system(size: 22))
+                    .font(.callout)
                     .foregroundStyle(TVTheme.muted)
             }
             ForEach(session?.rungItems ?? [], id: \.rung) { item in
@@ -131,7 +131,6 @@ struct TVLiveMenuView: View {
                 }
             }
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
     }
@@ -160,7 +159,7 @@ struct TVLiveMenuView: View {
     private func section(_ type: ServiceType) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(type.title)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.headline)
                 .foregroundStyle(TVTheme.body)
                 .padding(.top, 24)
                 .padding(.leading, 4)
@@ -189,7 +188,7 @@ struct TVLiveMenuView: View {
                 HStack(spacing: 14) {
                     if let key = service.remoteControlKey {
                         Text("\(key)")
-                            .font(.system(size: 24))
+                            .font(.callout)
                             .foregroundStyle(TVTheme.muted)
                             .frame(width: 18, alignment: .leading)
                     }
@@ -199,7 +198,7 @@ struct TVLiveMenuView: View {
                     if isCurrent {
                         if model.isPlaybackOpen {
                             Text("視聴中")
-                                .font(.system(size: 21, weight: .bold))
+                                .font(.caption.bold())
                                 .foregroundStyle(TVTheme.ink)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 2)
@@ -214,11 +213,11 @@ struct TVLiveMenuView: View {
                     }
                 }
                 Text(service.name)
-                    .font(DenpaFont.font(size: 32))
+                    .font(DenpaFont.font(.title3))
                     .fontWeight(.bold)
                     .lineLimit(1)
                 Text(service.now?.title ?? "")
-                    .font(DenpaFont.font(size: 25))
+                    .font(DenpaFont.font(.callout))
                     .foregroundStyle(TVTheme.muted)
                     .lineLimit(1)
             }
@@ -234,11 +233,11 @@ struct TVLiveMenuView: View {
     private func marks(_ service: Service) -> some View {
         if service.now?.recording == true {
             Text("● 録画中")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(TVTheme.record)
         } else if service.now?.reserved == true {
             Text("✓ 予約済み")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
         }
     }

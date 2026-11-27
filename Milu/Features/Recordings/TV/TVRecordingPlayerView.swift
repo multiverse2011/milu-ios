@@ -5,6 +5,7 @@ import SwiftUI
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
 /// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
+/// 操作の列と帯の高さ (340/520/620) から字幕の持ち上げ量を決めているので、映像の上の字は固定の大きさのままにする。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
     /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
@@ -213,7 +214,7 @@ struct TVRecordingPlayerView: View {
                     .foregroundStyle(.white.opacity(0.78))
             }
             Text(session.recording.title)
-                .font(DenpaFont.font(size: 44))
+                .font(DenpaFont.font(.title2))
                 .fontWeight(.bold)
                 .lineLimit(2)
         }
@@ -367,7 +368,6 @@ struct TVRecordingPlayerView: View {
                 }
             }
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
     }
@@ -486,7 +486,6 @@ struct TVRecordingPlayerView: View {
                 Button("閉じる", action: close)
                     .buttonStyle(.bordered)
             }
-            .font(.system(size: 28, weight: .semibold))
             .controlSize(.large)
             .padding(.top, 26)
         }
@@ -525,7 +524,7 @@ struct TVRecordingPlayerView: View {
                 Text("最後まで観ました")
                     .font(.system(size: 30, weight: .semibold))
                 Text(session.recording.title)
-                    .font(DenpaFont.font(size: 40))
+                    .font(DenpaFont.font(.title2))
                     .fontWeight(.bold)
                     .foregroundStyle(.white.opacity(0.86))
                 HStack(spacing: 20) {
@@ -534,7 +533,6 @@ struct TVRecordingPlayerView: View {
                     Button("削除", role: .destructive) { confirmDelete = true }
                         .buttonStyle(.bordered)
                 }
-                .font(.system(size: 28, weight: .semibold))
                 .controlSize(.large)
                 .padding(.top, 20)
             }

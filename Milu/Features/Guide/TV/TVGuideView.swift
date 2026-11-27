@@ -41,17 +41,17 @@ struct TVGuideView: View {
                 .font(.system(size: 64, weight: .light))
                 .foregroundStyle(TVTheme.muted)
             Text("denpa に接続できません")
-                .font(.system(size: 40, weight: .bold))
+                .font(.title2.bold())
                 .padding(.top, 10)
             Text("\(app.server?.displayName ?? "") から応答がありません。\nWi-Fi などの接続状況を確認してください。")
-                .font(.system(size: 26))
+                .font(.callout)
                 .foregroundStyle(TVTheme.muted)
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
             Button("再試行") {
                 Task { await model.reload() }
             }
-            .font(.system(size: 26, weight: .semibold))
+            .font(.callout.weight(.semibold))
             .padding(.top, 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -176,7 +176,7 @@ private struct TVGuideBoard: View {
     ) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 24, weight: active ? .bold : .medium))
+                .font(.callout.weight(active ? .bold : .medium))
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.capsule)
@@ -199,11 +199,11 @@ private struct TVGuideBoard: View {
                         ChannelLogoView(path: service.logo, serviceName: service.name, width: 52, height: 30)
                         if let key = service.remoteControlKey {
                             Text("\(key)")
-                                .font(.system(size: 21))
+                                .font(.caption)
                                 .foregroundStyle(TVTheme.muted)
                         }
                         Text(service.name)
-                            .font(DenpaFont.font(size: 25))
+                            .font(DenpaFont.font(.callout))
                             .bold()
                             .lineLimit(1)
                     }
@@ -286,13 +286,13 @@ private struct TVGuideBoard: View {
             ForEach(0..<24, id: \.self) { hour in
                 let time = from + Double(hour) * 3_600_000
                 Text("\(GuideLayout.calendar.component(.hour, from: Date(timeIntervalSince1970: time / 1000)))")
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(TVTheme.muted)
                     .offset(y: GuideLayout.offset(of: time, from: from, pointsPerMinute: GuideLayout.tvPointsPerMinute) + 6)
             }
             if let nowY = nowOffset(now: now) {
                 Text("\(GuideLayout.calendar.component(.minute, from: now))")
-                    .font(.system(size: 21, weight: .bold))
+                    .font(.caption.bold())
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 1)
@@ -462,7 +462,8 @@ private struct TVGuideCell: View {
                         .frame(width: 11, height: 11)
                         .padding(.top, 11)
                     title
-                        .font(DenpaFont.font(size: 25))
+                        // マスの高さ (1 分 4.6pt) から入る行数で行を切るので、字はテキストスタイルの段に置いたまま固定する
+                        .font(DenpaFont.font(.callout))
                         .foregroundStyle(.primary)
                         .lineLimit(lines.title)
                         .truncationMode(.tail)
@@ -470,7 +471,7 @@ private struct TVGuideCell: View {
             }
             if lines.description > 0, let description = item.description, !description.isEmpty {
                 Text(description)
-                    .font(DenpaFont.font(size: 21))
+                    .font(DenpaFont.font(.footnote))
                     .foregroundStyle(TVTheme.muted)
                     .lineLimit(lines.description)
                     .truncationMode(.tail)
