@@ -173,7 +173,7 @@ struct TVLiveMenuView: View {
                 .padding(.vertical, 16)
                 .padding(.horizontal, 4)
             }
-            // 先頭・末尾のカードのフォーカス枠と拡大が横の端で切れないようにする (#71。
+            // 先頭・末尾のカードの、標準のフォーカスの浮き上がりと影が横の端で切れないようにする (#71。
             // 録画・検索の横の列と同じ作り)
             .scrollClipDisabled()
             .focusSection()
