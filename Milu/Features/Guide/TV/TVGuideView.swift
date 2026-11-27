@@ -457,6 +457,12 @@ private struct TVGuideCell: View {
                     Circle()
                         .fill(genreColor)
                         .frame(width: 11, height: 11)
+                        // 白地では淡いジャンル色が消えるので、フォーカス中だけ縁を付ける
+                        .overlay {
+                            if focused {
+                                Circle().strokeBorder(.black.opacity(0.45), lineWidth: 1)
+                            }
+                        }
                         .padding(.top, 11)
                     title
                         // マスの高さ (1 分 4.6pt) から入る行数で行を切るので、題は .callout の段に留める
@@ -468,7 +474,8 @@ private struct TVGuideCell: View {
             }
             if lines.description > 0, let description = item.description, !description.isEmpty {
                 Text(description)
-                    .font(DenpaFont.font(.footnote))
+                    // 行の見積り (GuideText の detailLine) は旧 21pt の前提なので、近い .caption に留める
+                    .font(DenpaFont.font(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(lines.description)
                     .truncationMode(.tail)
@@ -514,7 +521,9 @@ private struct TVGuideCell: View {
     }
 
     private func color(of badge: GuideCellBadge) -> Color {
-        switch badge {
+        // フォーカス中は白地になるので、意味のある印も黒に落として読めるようにする
+        if focused { return .black }
+        return switch badge {
         case .reserved: Color.accentColor
         case .recording: Color.red
         case .conflict: Color.orange
