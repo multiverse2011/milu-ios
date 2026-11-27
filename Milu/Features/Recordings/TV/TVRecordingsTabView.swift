@@ -46,8 +46,7 @@ struct TVRecordingsTabView: View {
                     recording: recording,
                     onPlay: { from in open(recording, from: from) },
                     onDelete: {
-                        // 消した録画へは戻らない。焦点は先頭 (tvOS の既定) に任せる
-                        lastFocused = nil
+                        // 消せたかは delete の結果で決まる。失敗したら元のカードへ戻す
                         self.cover = nil
                         Task { await delete(recording) }
                     },
@@ -55,7 +54,10 @@ struct TVRecordingsTabView: View {
                 )
                 .background(TVTheme.background)
             case .watch(let request):
-                TVRecordingPlayerView(session: request.session) {
+                TVRecordingPlayerView(
+                    session: request.session,
+                    onDeleted: { forget(request.session.recording.id) }
+                ) {
                     self.cover = nil
                     Task { await model.refreshFromEvents() }
                 }
@@ -245,7 +247,9 @@ struct TVRecordingsTabView: View {
     // MARK: - 決まり
 
     private var hero: Recording? {
-        model.visible.first { $0.id == lastFocused } ?? model.visible.first
+        // ふだんはフォーカスに直接合わせ、メニューで nil の間だけ最後にフォーカスした録画にする
+        let id = focused ?? lastFocused
+        return model.visible.first { $0.id == id } ?? model.visible.first
     }
 
     /// 長押しメニューから詳細を開くと、閉じたときに焦点が既定の先頭へ落ちる。最後にフォーカスした
@@ -257,6 +261,12 @@ struct TVRecordingsTabView: View {
             return
         }
         focused = id
+    }
+
+    /// 消えた録画へは戻らない。焦点も外す (先頭は tvOS の既定に任せる)
+    private func forget(_ id: Int64) {
+        if lastFocused == id { lastFocused = nil }
+        if focused == id { focused = nil }
     }
 
     /// 絵の右上の暖かい光
@@ -291,7 +301,9 @@ struct TVRecordingsTabView: View {
     private func delete(_ recording: Recording) async {
         if let message = await model.delete(recording) {
             alertMessage = message
+            return
         }
+        forget(recording.id)
     }
 }
 
