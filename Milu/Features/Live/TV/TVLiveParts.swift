@@ -2,15 +2,14 @@ import SwiftUI
 
 /// Apple TV のライブの部品 (TV-Live・TV-LiveHud・TV-LiveTuning・TV-LiveDetail)。
 
-/// リモコンのフォーカスの的 (3.5.1)
+/// リモコンのフォーカスの的 (3.5.1)。操作の列は項目ごとに 1 つのメニューなので、
+/// メニューの中の選択肢ではなく、メニューのボタンに当てる
 enum TVLiveFocus: Hashable {
     case video
-    /// 画質のボタン (`PlaybackSession.qualityItems` の番号)
-    case quality(Int)
-    /// 解像度のボタン (段の番号)
-    case rung(Int)
+    /// 画質 (解像度もこのメニューの中)
+    case quality
     case captions
-    case audio(String)
+    case audio
     case record
     case station(Int64)
     case detailRecord
