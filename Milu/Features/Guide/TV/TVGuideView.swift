@@ -389,22 +389,26 @@ private struct TVGuideBoard: View {
         return nil
     }
 
-    /// 読み直しで焦点の列が使えなくなったら、近い列へ移す。的が消えた列に留まると cursor と
-    /// 食い違って格子が無反応になる。送り先の的ができてから焦点を渡すため、cursor と送りを
-    /// そろえてから focus を代入する。focus は的が消えた時点で nil に落ち得るので、
-    /// 判断は最後に焦点のあった列 (`lastColumn`) でする
+    /// 読み直しで焦点の列が使えなくなったら、近い列へ寄せる。的が消えた列に留まると cursor と
+    /// 食い違って格子が無反応になる。focus は的が消えた時点で nil に落ち得るので、判断は最後に
+    /// 焦点のあった列 (`lastColumn`) でする。focus を移すのは格子が焦点を持っているときだけで、
+    /// サイドバー・詳細・チップの焦点は利用者のものなので触らない
     private func repairFocus(_ services: [GuideService], now: Date) {
         guard let column = lastColumn ?? focusColumn,
               !GuideCursorMotion.isUsable(column, in: services)
         else { return }
         let anchor = cursor?.anchor ?? Int64(now.timeIntervalSince1970 * 1000)
         guard let target = GuideCursorMotion.fallbackCursor(from: column, anchor: anchor, in: services) else {
-            focus = nil
+            cursor = nil
+            lastColumn = nil
             return
         }
         cursor = target
+        lastColumn = target.column
         follow(target, in: services)
-        focus = .column(target.column)
+        if focusColumn != nil {
+            focus = .column(target.column)
+        }
     }
 
     // MARK: 作る範囲
