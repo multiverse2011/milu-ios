@@ -478,7 +478,7 @@ struct TVRecordingPlayerView: View {
             HStack(spacing: 20) {
                 if stop.retry {
                     Button("再試行") { session.retry() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
                 }
                 Button("閉じる", action: close)
                     .buttonStyle(.bordered)
@@ -526,7 +526,7 @@ struct TVRecordingPlayerView: View {
                     .foregroundStyle(.white.opacity(0.86))
                 HStack(spacing: 20) {
                     Button("一覧へ戻る", action: close)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
                     Button("削除", role: .destructive) { confirmDelete = true }
                         .buttonStyle(.bordered)
                 }

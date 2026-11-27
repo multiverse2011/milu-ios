@@ -103,23 +103,23 @@ struct TVRecordingDetailView: View {
     }
 
     /// 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 優先度は 主要 = prominent、破壊的 = role、ほか = bordered で表す
+    /// 押せる物は bordered に揃えて tint で塗らず、破壊的 (削除) だけ role で表す
     private var buttons: some View {
         HStack(spacing: 20) {
             if recording.recording {
                 Button("再生") { onPlay(nil) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
             } else if let startResumeMs {
                 Button("続きから再生 (\(Wording.position(startResumeMs)))") {
                     onPlay(Double(startResumeMs) / 1000)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 Button("最初から") { onPlay(0) }
                     .buttonStyle(.bordered)
                 deleteButton
             } else {
                 Button("再生") { onPlay(nil) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                 deleteButton
             }
             Button("閉じる", action: onClose)

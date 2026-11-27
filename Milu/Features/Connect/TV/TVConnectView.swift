@@ -58,7 +58,7 @@ struct TVConnectView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .disabled(model.isConnecting)
                 .padding(.top, 8)

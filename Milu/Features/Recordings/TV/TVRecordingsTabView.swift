@@ -172,7 +172,7 @@ struct TVRecordingsTabView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
             Button("ライブへ", action: onGoLive)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .padding(.top, 30)
         }
@@ -421,7 +421,7 @@ struct TVOfflineView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
             Button("再試行", action: retry)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .padding(.top, 24)
         }
