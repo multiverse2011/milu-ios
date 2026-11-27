@@ -78,6 +78,19 @@ nonisolated enum GuideCursorMotion {
         services.indices.contains(column) && !services[column].programs.isEmpty
     }
 
+    /// 使えなくなった列 (番組が消えた・局が減った) から戻る代わり。いちばん近い番組のある列で、
+    /// 基準の時刻 (`anchor`) は元のまま。同じ距離なら左の列。
+    static func fallbackCursor(from column: Int, anchor: Int64, in services: [GuideService]) -> GuideCursor? {
+        guard !services.isEmpty else { return nil }
+        let start = min(max(0, column), services.count - 1)
+        for step in 0..<services.count {
+            for next in [start - step, start + step] where isUsable(next, in: services) {
+                return cursor(at: next, anchor: anchor, in: services)
+            }
+        }
+        return nil
+    }
+
     /// その時刻に入っている番組。無ければ、その時刻までで最後に始まった番組 (それも無ければ先頭)。
     private static func nearest(to time: Int64, in programs: [GuideProgram]) -> GuideProgram? {
         if let covering = programs.first(where: { $0.startAt <= time && time < $0.endAt }) {

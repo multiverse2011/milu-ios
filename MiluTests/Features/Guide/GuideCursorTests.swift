@@ -152,6 +152,28 @@ struct GuideCursorTests {
         #expect(!GuideCursorMotion.isUsable(9, in: list))
     }
 
+    @Test func fallbackCursorGoesToTheNearestUsableColumn() {
+        // 使えなくなった列から、左右いちばん近い番組のある列へ移る。基準の時刻は元のまま
+        let hour: Int64 = 3_600_000
+        let anchor = 10 * hour + 30 * 60_000
+        func station(_ id: Int64, _ programID: Int64?) -> GuideService {
+            service(id, programID.map { [(id: $0, start: 10 * hour, end: 12 * hour)] } ?? [])
+        }
+        // 左右どちらにも使える列がある (同じ距離なら左)
+        let both = [station(1, 11), station(2, nil), station(3, 12)]
+        #expect(GuideCursorMotion.fallbackCursor(from: 1, anchor: anchor, in: both) == GuideCursor(column: 0, programID: 11, anchor: anchor))
+        // 左だけ使える
+        let leftOnly = [station(1, 21), station(2, nil), station(3, nil)]
+        #expect(GuideCursorMotion.fallbackCursor(from: 1, anchor: anchor, in: leftOnly) == GuideCursor(column: 0, programID: 21, anchor: anchor))
+        // 右だけ使える
+        let rightOnly = [station(1, nil), station(2, nil), station(3, 31)]
+        #expect(GuideCursorMotion.fallbackCursor(from: 1, anchor: anchor, in: rightOnly) == GuideCursor(column: 2, programID: 31, anchor: anchor))
+        // 局が減って列が範囲外になったら、端の列から近い方へ
+        #expect(GuideCursorMotion.fallbackCursor(from: 9, anchor: anchor, in: rightOnly) == GuideCursor(column: 2, programID: 31, anchor: anchor))
+        // 使える列が無ければ nil
+        #expect(GuideCursorMotion.fallbackCursor(from: 1, anchor: anchor, in: [station(1, nil), station(2, nil)]) == nil)
+    }
+
     @Test func staleCursorIsNotFound() {
         #expect(GuideCursorMotion.program(GuideCursor(column: 0, programID: 99, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.program(GuideCursor(column: 9, programID: 1, anchor: 0), in: services) == nil)
