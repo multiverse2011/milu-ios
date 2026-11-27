@@ -1,4 +1,7 @@
 import Foundation
+#if os(tvOS)
+import UIKit
+#endif
 import Testing
 
 @testable import Milu
@@ -95,6 +98,7 @@ import Testing
         }
     }
 
+    #if os(tvOS)
     @Test func tvCellLinesFitInsideTheCell() {
         // TV-Guide は 1 分 4.6pt。30 分のマス (138pt) は題 2 行 + 説明 1 行
         #expect(GuideText.tvCellLines(height: 138).title == 2)
@@ -108,17 +112,41 @@ import Testing
         // 1 行も入らないマスは何も出さない
         #expect(GuideText.tvCellLines(height: 20).title == 0)
 
-        // どの高さでも、出る行がマスの内側に収まる
-        let titleLine = 34.0, detailLine = 30.0, spacing = 4.0
+        // どの高さでも、出る行が実フォントの行の高さでマスの内側に収まる (境目の 122pt 前後も含む)
         for height in stride(from: 1.0, through: 600.0, by: 0.5) {
             let lines = GuideText.tvCellLines(height: height)
-            var used = Double(lines.title) * titleLine
-            if lines.description > 0 { used += spacing + Double(lines.description) * detailLine }
             if lines.title > 0 {
-                #expect(used <= height - 20)
+                #expect(realHeight(lines) <= height - 20)
             }
         }
     }
+
+    /// 文字の大きさの設定を上げても、見積りは実フォントの行の高さに追従してはみ出さない
+    @Test func tvCellLinesFollowTheTextSize() {
+        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityLarge)
+        var lines = (title: 0, description: 0)
+        traits.performAsCurrent {
+            lines = GuideText.tvCellLines(height: 276)
+        }
+        // 字が大きくなるぶん、入る行は減る
+        #expect(lines.description < 6)
+        #expect(realHeight(lines, traits: traits) <= 276 - 20)
+    }
+
+    /// 実フォント (Denpa Font) の行の高さで並べたときの高さ。実装の見積りとは別に UIFont から測る
+    private func realHeight(_ lines: (title: Int, description: Int), traits: UITraitCollection = .current) -> Double {
+        var used = Double(lines.title) * Double(denpaLineHeight(system: .callout, traits: traits))
+        if lines.description > 0 {
+            used += 4 + Double(lines.description) * Double(denpaLineHeight(system: .caption1, traits: traits))
+        }
+        return used
+    }
+
+    private func denpaLineHeight(system style: UIFont.TextStyle, traits: UITraitCollection) -> CGFloat {
+        let size = UIFont.preferredFont(forTextStyle: style, compatibleWith: traits).pointSize
+        return UIFont(name: DenpaFont.postScriptName, size: size)?.lineHeight ?? size
+    }
+    #endif
 
     @Test func extendedItemsPutPreferredFirstThenSorted() {
         let extended = ["出演者": "A", "その他": "X", "番組内容": "B", "解説": "Y"]

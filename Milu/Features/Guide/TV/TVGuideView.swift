@@ -481,7 +481,7 @@ private struct TVGuideCell: View {
             }
             if lines.description > 0, let description = item.description, !description.isEmpty {
                 Text(description)
-                    // 説明は .caption。tvOS で 25pt、行の高さ 28pt で GuideText の行の見積り (30pt) に収まる
+                    // 説明は .caption。行の高さは GuideText が実フォントから取る
                     .font(DenpaFont.font(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(lines.description)
