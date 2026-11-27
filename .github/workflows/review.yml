@@ -29,15 +29,18 @@ jobs:
     # 1 run で 50〜60 本を直列に呼び、合計 15 分前後かかる。15 分だと毎回 cancelled になる
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      # public で LAN の runner を使うので、タグではなく commit に固定する
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
+          # GITHUB_TOKEN を .git/config に残さない (レビューは gh だけで足りる)
+          persist-credentials: false
       # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB は bubblewrap で Bash の子プロセスから鍵を消す。runner のイメージの更新などで
       # bwrap が動かなくなったまま黙ってレビューを続けないよう、ここで止める
       - name: bubblewrap が動くことを確かめる
         run: bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent true
       # Claude Code を LiteLLM 経由で Kimi Code へ向けて動かす (鍵は LiteLLM が持ち、ここには仮想キーだけ)
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
         env:
           ANTHROPIC_BASE_URL: ${{ vars.LITELLM_BASE_URL }}
           ANTHROPIC_MODEL: kimi/kimi-for-coding
