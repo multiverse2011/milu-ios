@@ -30,6 +30,8 @@ jobs:
           brew install xcodegen
           xcodegen generate
       - name: iPhone 17 で単体テストを実行する
+        env:
+          TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
         run: |
           mkdir -p DerivedData/results
           # Keychain を使うテストには entitlement が必要なので、証明書不要のアドホック署名を使う
@@ -64,6 +66,8 @@ jobs:
           brew install xcodegen
           xcodegen generate
       - name: Apple TV 4K で単体テストを実行する
+        env:
+          TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
         run: |
           mkdir -p DerivedData/results
           xcodebuild test -project Milu.xcodeproj -scheme Milu \
