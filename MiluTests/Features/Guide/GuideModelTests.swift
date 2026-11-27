@@ -230,4 +230,115 @@ import Testing
         let query = request?.url?.query ?? ""
         #expect(query.contains("from="))
     }
+
+    // MARK: tvOS の窓
+
+    private func response(
+        from: Int64,
+        to: Int64,
+        programs: [(id: Int64, startAt: Int64)],
+        until: Int64? = nil
+    ) -> GuideResponse {
+        GuideResponse(
+            type: .GR,
+            from: from,
+            to: to,
+            until: until,
+            services: [
+                GuideService(
+                    id: 3273601024,
+                    name: "ＮＨＫ総合１・東京",
+                    mainId: nil,
+                    remoteControlKey: 1,
+                    logo: nil,
+                    programs: programs.map {
+                        GuideProgram(
+                            id: $0.id,
+                            name: "番組\($0.id)",
+                            startAt: $0.startAt,
+                            endAt: $0.startAt + 1_800_000,
+                            description: nil,
+                            genre: nil,
+                            copyNever: false,
+                            reservation: nil,
+                            recordingId: nil
+                        )
+                    }
+                )
+            ]
+        )
+    }
+
+    @Test func mergeJoinsDaysInTimeOrder() throws {
+        let first = response(from: 1_000, to: 9_000, programs: [(1, 2_000), (2, 5_000)], until: 8_000)
+        let second = response(from: 9_000, to: 17_000, programs: [(2, 5_000), (3, 9_000)], until: 12_000)
+        let merged = try #require(GuideModel.merge([second, first]))
+        #expect(merged.from == 1_000)
+        #expect(merged.to == 17_000)
+        #expect(merged.until == 12_000)
+        // 2 日目にも出てくる番組は 1 つにまとめ、始まり順に並べる
+        #expect(merged.services.first?.programs.map(\.id) == [1, 2, 3])
+    }
+
+    @Test func tvReloadLoadsDaysAroundCursor() async throws {
+        let now = GuideLayout.calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 15))!
+        let stub = tvTransport()
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvReload(center: model.selectedDay)
+        #expect(model.tvDays.count == 2)
+        #expect(model.tvGuide?.services.first?.programs.count == 2)
+        #expect(model.tvGuide?.from == model.tvFrom)
+        #expect(model.tvGuide?.to == model.tvTo)
+        // 明日へ進むと、その次の日も先に読む
+        let tomorrow = try #require(GuideLayout.calendar.date(byAdding: .day, value: 1, to: model.selectedDay))
+        await model.tvReload(center: tomorrow)
+        #expect(model.tvDays.count == 3)
+        #expect(model.tvGuide?.services.first?.programs.count == 3)
+    }
+
+    @Test func tvReloadKeepsLoadedDaysOnFailure() async throws {
+        let now = GuideLayout.calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 15))!
+        let calls = Box(0)
+        let stub = tvTransport { _ in
+            let count = calls.value
+            calls.value = count + 1
+            // 最初の 2 日 (今日・明日) は返し、その先は繋がらない
+            return count < 2
+        }
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvReload(center: model.selectedDay)
+        #expect(model.tvDays.count == 2)
+        let tomorrow = try #require(GuideLayout.calendar.date(byAdding: .day, value: 1, to: model.selectedDay))
+        await model.tvReload(center: tomorrow)
+        // 読めなかった次の日は入らないが、いまある範囲はそのまま使える
+        #expect(model.tvDays.count == 2)
+        #expect(model.tvGuide?.services.first?.programs.count == 2)
+        #expect(!model.tvDidFail)
+    }
+
+    /// tvOS の窓の読み。要求された from/to の日に 1 本ずつ番組を返す
+    private func tvTransport(
+        succeeds: @escaping @Sendable (Int) -> Bool = { _ in true }
+    ) -> StubTransport {
+        let count = Box(0)
+        return StubTransport { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("api/services") {
+                return reply(request, 200, self.servicesJSON)
+            }
+            let index = count.value
+            count.value = index + 1
+            guard succeeds(index) else { throw URLError(.timedOut) }
+            let query = request.url?.query ?? ""
+            let from = Int64(query.split(separator: "&").first { $0.hasPrefix("from=") }?.dropFirst(5) ?? "") ?? 0
+            let to = Int64(query.split(separator: "&").first { $0.hasPrefix("to=") }?.dropFirst(3) ?? "") ?? 0
+            let body = """
+            {"type":"GR","from":\(from),"to":\(to),"until":null,"services":[
+              {"id":3273601024,"name":"ＮＨＫ総合１・東京","mainId":null,"remoteControlKey":1,"logo":null,
+               "programs":[{"id":\(from),"name":"番組","startAt":\(from),"endAt":\(from + 3600000),
+                 "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null}]}]}
+            """
+            return reply(request, 200, body)
+        }
+    }
 }

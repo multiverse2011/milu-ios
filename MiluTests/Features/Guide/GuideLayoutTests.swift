@@ -216,6 +216,28 @@ struct GuideLayoutTests {
         #expect(GuideLayout.tvColumnRange(scrollX: 266 * 3, width: 500, count: 6) == 2..<6)
     }
 
+    @Test func tvWindowAroundCursor() {
+        // チップに出る日は 0 時の日付 (14〜21)。カーソルの日の前後 1 日ずつ
+        let first = date(14, 0)
+        let last = date(21, 0)
+        #expect(GuideLayout.tvWindowDays(center: date(14, 15), first: first, last: last) == [date(14, 0), date(15, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(15, 15), first: first, last: last) == [date(14, 0), date(15, 0), date(16, 0)])
+        // 4:00 より前は前の放送日がカーソルの日
+        #expect(GuideLayout.tvWindowDays(center: date(16, 2), first: first, last: last) == [date(14, 0), date(15, 0), date(16, 0)])
+        // 最後の日はそこで止める
+        #expect(GuideLayout.tvWindowDays(center: date(21, 15), first: first, last: last) == [date(20, 0), date(21, 0)])
+        // until で最後の日が縮んだとき
+        #expect(GuideLayout.tvWindowDays(center: date(16, 15), first: first, last: date(16, 0)) == [date(15, 0), date(16, 0)])
+        // 起点の日より前は持たない
+        #expect(GuideLayout.tvWindowDays(center: date(15, 15), first: date(15, 0), last: last) == [date(15, 0), date(16, 0)])
+    }
+
+    @Test func dayHeading() {
+        #expect(GuideLayout.dayHeading(for: date(29, 0), calendar: calendar) == "11/29")
+        let december = calendar.date(from: DateComponents(year: 2026, month: 12, day: 1))!
+        #expect(GuideLayout.dayHeading(for: december, calendar: calendar) == "12/1")
+    }
+
     @Test func tvDayChips() {
         // TV-Guide の日付のチップは「今日」「明日」「16 (月)」
         let now = date(14, 15)
