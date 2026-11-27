@@ -83,11 +83,13 @@ private struct TVGuideBoard: View {
     /// 最後に焦点の当たっていた列。的が消えると focus が nil に落ちるので、直すときの手掛かりに持つ
     @State private var lastColumn: Int?
     @State private var scroll = CGPoint.zero
-    /// 動きの始点。動いている間は送り元と送り先の両方の範囲を作る (途中で列やマスが消えないように)
-    @State private var scrollFrom = CGPoint.zero
-    /// 動きの通し番号。割り込まれた動きの完了では始点を畳まない (連打で範囲が狭まらないように)
+    /// 動きの連鎖中に出した送り先の最小・最大。動いている間はこの範囲と現在地の両方の列・行を作る
+    /// (逆向きに割り込まれても、途中の描画位置がこの範囲の外へ出ないように)
+    @State private var scrollLow = CGPoint.zero
+    @State private var scrollHigh = CGPoint.zero
+    /// 動きの通し番号。割り込まれた動きの完了では範囲を畳まない (連打で範囲が狭まらないように)
     @State private var animationToken = 0
-    /// 動きの連鎖が続いているか。始点を畳むのは連鎖が終わったときだけ
+    /// 動きの連鎖が続いているか。範囲を畳むのは連鎖が終わったときだけ
     @State private var isAnimating = false
     @State private var viewport = CGSize.zero
     @State private var didScroll = false
@@ -117,7 +119,8 @@ private struct TVGuideBoard: View {
         .onChange(of: model.selectedType) { _, _ in reset() }
         // 読み直しで局が減ると表の幅が縮む。古い送り位置のままだと全部が画面の外に出る
         .onChange(of: guide.services.count) { _, _ in
-            scroll = CGPoint(x: clampX(scroll.x), y: scroll.y)
+            let x = clampX(scroll.x)
+            withAnimation(nil) { scroll = CGPoint(x: x, y: scroll.y) }
         }
         // 読み直しで焦点の列が使えなくなったら (番組が消えた・局が減った)、近い列へ移す
         .onChange(of: guide.services) { _, services in
@@ -300,7 +303,8 @@ private struct TVGuideBoard: View {
         let rows = rowRange(size: size)
         let nowY = nowOffset(now: now)
         let selected = resolvedCursor(now: now)
-        let focused = focusColumn != nil ? selected : nil
+        // 焦点の列とカーソルの列がそろっているときだけ強調する (読み直し直後の 1 フレーム対策)
+        let focused = selected?.column == focusColumn ? selected : nil
         return ZStack(alignment: .topLeading) {
             ForEach(Array(columnRange(size: size)), id: \.self) { column in
                 ForEach(cells(in: column, rows: rows), id: \.item.id) { cell in
@@ -339,10 +343,9 @@ private struct TVGuideBoard: View {
         .frame(width: contentWidth, height: totalHeight, alignment: .topLeading)
     }
 
-    /// 青枠の位置 (フォーカスの当たっているマス)
+    /// 青枠の位置 (フォーカスの当たっているマス)。焦点の列とカーソルの列がそろっているときだけ出す
     private func focusFrame(for cursor: GuideCursor?) -> (x: Double, y: Double, width: Double, height: Double)? {
-        guard focusColumn != nil,
-              let cursor,
+        guard let cursor, cursor.column == focusColumn,
               let (column, program) = GuideCursorMotion.program(cursor, in: guide.services),
               let frame = GuideLayout.frame(
                   start: Double(program.startAt),
@@ -450,18 +453,18 @@ private struct TVGuideBoard: View {
         GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap
     }
 
-    /// 作る列。動いている間は送り元と送り先の両方を作る
+    /// 作る列。動いている間は連鎖中に出した送り先の範囲 (と現在地) を作る
     private func columnRange(size: CGSize) -> Range<Int> {
         let count = guide.services.count
-        let first = GuideLayout.tvColumnRange(scrollX: min(scroll.x, scrollFrom.x), width: Double(size.width), count: count)
-        let last = GuideLayout.tvColumnRange(scrollX: max(scroll.x, scrollFrom.x), width: Double(size.width), count: count)
+        let first = GuideLayout.tvColumnRange(scrollX: min(scroll.x, scrollLow.x), width: Double(size.width), count: count)
+        let last = GuideLayout.tvColumnRange(scrollX: max(scroll.x, scrollHigh.x), width: Double(size.width), count: count)
         return first.lowerBound..<last.upperBound
     }
 
-    /// 作る行。動いている間は送り元と送り先の両方を作る
+    /// 作る行。動いている間は連鎖中に出した送り先の範囲 (と現在地) を作る
     private func rowRange(size: CGSize) -> ClosedRange<Double> {
         let margin = 300.0
-        return max(0, min(scroll.y, scrollFrom.y) - margin)...(max(scroll.y, scrollFrom.y) + Double(size.height) + margin)
+        return max(0, min(scroll.y, scrollLow.y) - margin)...(max(scroll.y, scrollHigh.y) + Double(size.height) + margin)
     }
 
     private func cells(
@@ -502,11 +505,14 @@ private struct TVGuideBoard: View {
     }
 
     /// 焦点の移動に合わせて、表と青枠を滑らかに送る。連打では前の動きを打ち切って次へ向かう
-    /// (アニメーションは溜まらない)。動いている間は、割り込まれた動きの見えている位置まで
-    /// 遡って列・行を作る (始点 `scrollFrom` は動きの連鎖が終わるまで畳まない)
+    /// (アニメーションは溜まらない)。動いている間は、連鎖中に出した送り先の範囲を列・行に作る
     private func animate(to cursor: GuideCursor, in services: [GuideService]) {
+        // 何も動かない (読み直しの後始末や、同じ所へ入り直しただけ) なら動きを始めない
+        let target = followTarget(cursor, in: services)
+        guard cursor != self.cursor || (target != nil && target != scroll) else { return }
         if !isAnimating {
-            scrollFrom = scroll
+            scrollLow = scroll
+            scrollHigh = scroll
         }
         isAnimating = true
         animationToken += 1
@@ -517,7 +523,8 @@ private struct TVGuideBoard: View {
         } completion: {
             guard animationToken == token else { return }
             isAnimating = false
-            scrollFrom = scroll
+            scrollLow = scroll
+            scrollHigh = scroll
         }
     }
 
@@ -546,10 +553,10 @@ private struct TVGuideBoard: View {
     /// フォーカスの当たっている列を枠に入れ、その左右の次の列 (番組のある列) を少し見える所まで
     /// 横に送る。tvOS の焦点はクリップの外の的へは移れないので、次へ移れる分を先に出しておく。
     /// 縦は基準の時刻が画面に残る所まで送る (マスの端に合わせると、横に動くたび時刻が揺れる)。
-    /// `animated` が false のときは即座に送り、動きの始点も畳む (開いたとき・後始末)
-    private func follow(_ cursor: GuideCursor, in services: [GuideService], animated: Bool) {
+    /// 動かせない列なら `nil`
+    private func followTarget(_ cursor: GuideCursor, in services: [GuideService]) -> CGPoint? {
         let column = cursor.column
-        guard GuideCursorMotion.isUsable(column, in: services) else { return }
+        guard GuideCursorMotion.isUsable(column, in: services) else { return nil }
         let margin = 40.0
         let visibleWidth = max(Double(viewport.width) - GuideLayout.tvTimeWidth, 1)
         var x = scroll.x
@@ -580,13 +587,25 @@ private struct TVGuideBoard: View {
         } else if anchorY > y + Double(viewport.height) - margin {
             y = anchorY - Double(viewport.height) + margin
         }
-        let target = CGPoint(x: clampX(x), y: clampY(y))
-        if !animated {
-            // 開いたとき・後始末は即座。動きの連鎖も切る
-            isAnimating = false
-            scrollFrom = target
+        return CGPoint(x: clampX(x), y: clampY(y))
+    }
+
+    /// 送る。`animated` が false のときは即座に送り、動きの範囲も畳む (開いたとき・後始末)
+    private func follow(_ cursor: GuideCursor, in services: [GuideService], animated: Bool) {
+        guard let target = followTarget(cursor, in: services) else { return }
+        if animated {
+            // 連鎖中に出した送り先の最小・最大を覚える (逆向きに割り込まれても描画位置が外へ出ない)
+            scrollLow = CGPoint(x: min(scrollLow.x, target.x), y: min(scrollLow.y, target.y))
+            scrollHigh = CGPoint(x: max(scrollHigh.x, target.x), y: max(scrollHigh.y, target.y))
+            scroll = target
+        } else {
+            withAnimation(nil) {
+                isAnimating = false
+                scrollLow = target
+                scrollHigh = target
+                scroll = target
+            }
         }
-        scroll = target
     }
 
     /// 開いたときと、日付・種別を替えたとき。今日ならいまの線が上から 1/4 の所へ送る (3.5)。
@@ -598,10 +617,14 @@ private struct TVGuideBoard: View {
             GuideLayout.initialScrollOffset(nowOffset: $0, viewportHeight: Double(viewport.height))
         } ?? 0
         let target = CGPoint(x: 0, y: clampY(y))
-        scroll = target
-        isAnimating = false
-        scrollFrom = target
-        cursor = GuideCursorMotion.initial(in: guide.services, now: Int64(now.timeIntervalSince1970 * 1000))
+        // アニメーション中でも確実に止めて即座に置き直す
+        withAnimation(nil) {
+            scroll = target
+            isAnimating = false
+            scrollLow = target
+            scrollHigh = target
+            cursor = GuideCursorMotion.initial(in: guide.services, now: Int64(now.timeIntervalSince1970 * 1000))
+        }
     }
 
     private func clampX(_ x: Double) -> Double {
