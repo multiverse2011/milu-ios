@@ -1,0 +1,81 @@
+name: Apple プラットフォームのテストとビルド
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-tests:
+    name: iOS の単体テスト
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Xcode 27.2 を選ぶ
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.2.app
+          xcodebuild -version
+      - name: Xcode プロジェクトを生成する
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: iPhone 17 で単体テストを実行する
+        run: |
+          mkdir -p DerivedData/results
+          # Keychain を使うテストには entitlement が必要なので、証明書不要のアドホック署名を使う
+          xcodebuild test -project Milu.xcodeproj -scheme Milu \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath DerivedData/ios \
+            -resultBundlePath DerivedData/results/Milu-iOS.xcresult \
+            CODE_SIGN_IDENTITY=-
+      - name: 失敗時のテスト結果を保存する
+        if: failure()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: milu-ios-test-results
+          path: DerivedData/results/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  tvos-build:
+    name: tvOS のビルド
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Xcode 27.2 を選ぶ
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.2.app
+          xcodebuild -version
+      - name: Xcode プロジェクトを生成する
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Apple TV シミュレータ向けにビルドする
+        run: |
+          mkdir -p DerivedData/results
+          xcodebuild build -project Milu.xcodeproj -scheme Milu \
+            -destination 'generic/platform=tvOS Simulator' \
+            -derivedDataPath ../dd-ci \
+            -resultBundlePath DerivedData/results/Milu-tvOS.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+      - name: 失敗時のビルド結果を保存する
+        if: failure()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: milu-tvos-build-results
+          path: DerivedData/results/
+          if-no-files-found: ignore
+          retention-days: 3
