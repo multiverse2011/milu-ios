@@ -478,14 +478,11 @@ private struct TVGuideCell: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(width: GuideLayout.tvColumnWidth, height: height, alignment: .topLeading)
-        .background(background, in: RoundedRectangle(cornerRadius: 6))
+        // フォーカスは純正の設定の行と同じ白い地・黒い字で示す (シアンの枠はやめた)
+        .background(focused ? Color.white : background, in: RoundedRectangle(cornerRadius: 6))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay {
-            if focused {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.accentColor, lineWidth: 5)
-            }
-        }
+        .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: focused ? 12 : 0, y: focused ? 6 : 0)
+        .environment(\.colorScheme, focused ? .light : .dark)
     }
 
     /// 「`H:mm` ✓ 予約済み 番組名」。予約の印は題の行に並べる (TV-Guide の画面案)
