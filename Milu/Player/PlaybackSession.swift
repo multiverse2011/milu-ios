@@ -86,6 +86,9 @@ final class PlaybackSession {
     private var bufferedSince: Date?
     private var lastPosition = 0.0
     private var lastProgressAt = Date()
+    /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたとみなす間隔
+    private static let toggleWindow: TimeInterval = 0.4
+    private var lastToggleAt = Date.distantPast
 
     init(
         baseURL: URL,
@@ -368,8 +371,12 @@ final class PlaybackSession {
         return true
     }
 
+    /// 決定・再生/一時停止ボタンと Now Playing の toggle が同じ押下としてここへ来る。
+    /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
     @discardableResult
-    func togglePlayPause() -> Bool {
+    func togglePlayPause(now: Date = Date()) -> Bool {
+        guard now.timeIntervalSince(lastToggleAt) >= Self.toggleWindow else { return false }
+        lastToggleAt = now
         if phase == .paused {
             return play()
         }

@@ -299,6 +299,13 @@ final class LiveModel {
         session?.setCaptionsOn(on)
     }
 
+    /// 決定・再生/一時停止ボタン。ライブの一時停止は接続を閉じ、再開はその時点のライブ (D17)。
+    /// Now Playing の経路と二重に効かないことは `PlaybackSession` が受け止める
+    @discardableResult
+    func togglePlayPause() -> Bool {
+        session?.togglePlayPause() ?? false
+    }
+
     func toggleControls() {
         controlsVisible.toggle()
         if controlsVisible {

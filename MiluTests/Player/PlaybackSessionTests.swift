@@ -117,6 +117,41 @@ import Testing
         #expect(!backend.commandsEnabled)
     }
 
+    /// 決定・再生/一時停止ボタンと Now Playing の toggle。同じ押下が 2 度届いても 1 度だけ動き、
+    /// 間をあけた押下は選局し直してその時点のライブへ戻る (D17)
+    @Test func togglePlayPauseIgnoresTheSamePressTwice() {
+        let session = makeSession()
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 1,
+            timeline: 1,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation
+        ))
+        #expect(session.phase == .playing)
+
+        let pressed = Date()
+        #expect(session.togglePlayPause(now: pressed))
+        #expect(session.phase == .paused)
+
+        // 同じ押下がもう 1 つの経路から届いても、止まったまま
+        #expect(!session.togglePlayPause(now: pressed.addingTimeInterval(0.1)))
+        #expect(session.phase == .paused)
+
+        // 間をあけた押下で再開する (接続を開き直すので .loading から)
+        #expect(session.togglePlayPause(now: pressed.addingTimeInterval(1)))
+        #expect(session.phase == .loading)
+
+        // 閉じたあとは動かさない
+        session.close()
+        #expect(!session.togglePlayPause(now: pressed.addingTimeInterval(2)))
+        #expect(session.phase == .idle)
+    }
+
     @Test func videoFailureInBackgroundDoesNotStopPlayback() {
         let session = makeSession()
         session.open(makeService(), liveCodecs: [.h264])
