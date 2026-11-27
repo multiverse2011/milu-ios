@@ -135,8 +135,9 @@ struct TVLiveMenuView: View {
         .focusSection()
     }
 
-    /// 操作の列の 1 つ。選択中・録画中は字 (✓・● 録画中) で示す。フォーカス中の
-    /// bordered も地が tint になるので、地の色だけで選択を表すと見分けられない。
+    /// 操作の列の 1 つ。選択中・録画中は字 (✓・● 録画中) で示す。
+    /// tint は付けず、フォーカスの地と字は tvOS 標準の白地・黒字に任せる
+    /// (tint はフォーカス時の地と字の両方に効き、白地に白字になりうる)。
     /// 札の形を状態で切り替えると、押した直後にフォーカスが隣の札へ移るため、
     /// スタイルは bordered の 1 つに固定する (#75)
     private func chip(
@@ -149,7 +150,6 @@ struct TVLiveMenuView: View {
         let marked = selected && !recording ? "✓ \(title)" : title
         return Button(marked, action: action)
             .buttonStyle(.bordered)
-            .tint(recording ? TVTheme.record : nil)
             .focused($focus, equals: value)
             .accessibilityAddTraits(selected ? .isSelected : [])
     }

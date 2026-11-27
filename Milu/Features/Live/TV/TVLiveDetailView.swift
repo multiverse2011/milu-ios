@@ -124,7 +124,7 @@ struct TVLiveDetailView: View {
     }
 
     /// 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 録画中は字と録画の赤で示す。状態でスタイルを切り替えると押した直後に
+    /// 録画中は字 (● 録画中) で示す。状態でスタイルを切り替えると押した直後に
     /// フォーカスが外れるため、bordered の 1 つに固定する
     private var buttons: some View {
         HStack(spacing: 20) {
@@ -132,7 +132,6 @@ struct TVLiveDetailView: View {
                 onToggleRecord()
             }
                 .buttonStyle(.bordered)
-                .tint(recording ? TVTheme.record : nil)
                 .focused($focus, equals: .detailRecord)
             Button("閉じる") { onClose() }
                 .buttonStyle(.bordered)

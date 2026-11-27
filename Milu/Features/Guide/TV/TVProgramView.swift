@@ -162,7 +162,7 @@ struct TVProgramView: View {
     }
 
     /// 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 押せる物は bordered に揃えて tint で塗らない。録画 = 録画の赤の tint、
+    /// 押せる物は bordered に揃えて tint で塗らない。録画中かは字 (● 録画中) で示し、
     /// 予約の取り消し・録画の停止 = role
     private var buttons: some View {
         HStack(spacing: 20) {
@@ -211,7 +211,6 @@ struct TVProgramView: View {
         case .record:
             Button(label(for: button)) { perform(button, index: index) }
                 .buttonStyle(.bordered)
-                .tint(TVTheme.record)
         case .cancelReservation, .recordingNow:
             Button(label(for: button), role: .destructive) { perform(button, index: index) }
                 .buttonStyle(.bordered)
