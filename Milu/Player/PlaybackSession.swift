@@ -88,11 +88,8 @@ final class PlaybackSession {
     private var bufferedSince: Date?
     private var lastPosition = 0.0
     private var lastProgressAt = Date()
-    /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたとみなす間隔
-    private static let toggleWindow: TimeInterval = 0.4
-    private var lastToggleAt = Date.distantPast
-    /// 押下の時刻。テストから差し替える
-    private let clock: () -> Date
+    /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたかの控え
+    private var press = PressGuard()
 
     init(
         baseURL: URL,
@@ -102,7 +99,7 @@ final class PlaybackSession {
         onInvalidToken: @escaping @MainActor (URL) -> Void,
         onNeedsPairing: @escaping @MainActor (URL) -> Void,
         playable: [OfferCodec] = Playable.formats,
-        clock: @escaping () -> Date = { Date() },
+        clock: @escaping () -> DispatchTime = { .now() },
         startLoader: @escaping (StreamLoader) -> Void = { $0.start() }
     ) {
         self.devicePlayable = playable
@@ -115,8 +112,8 @@ final class PlaybackSession {
         self.nowPlaying = nowPlaying
         self.onInvalidToken = onInvalidToken
         self.onNeedsPairing = onNeedsPairing
-        self.clock = clock
         self.captionsOn = defaults.object(forKey: "captionsOn") as? Bool ?? true
+        self.press.now = clock
     }
 
     /// 画面の `onAppear` で 1 度だけ。レンダラをここで作る (MainActor の init)
@@ -143,7 +140,7 @@ final class PlaybackSession {
         policy = LivePlaybackPolicy(playable: playable)
         currentCodec = nil
         // 選局し直しは新しい押下として扱う。直前の押下の控えを新ストリームへ持ち越さない
-        lastToggleAt = .distantPast
+        press.reset()
         cancelTrial()
         committedRung = PlaybackRules.resolveRung(defaults.integer(forKey: "liveRung"))
         selectedRung = committedRung
@@ -364,10 +361,7 @@ final class PlaybackSession {
     /// 押下を控える。窓の外なら控えて true、2 度目なら false。
     /// 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
     private func claimPress() -> Bool {
-        let now = clock()
-        guard now.timeIntervalSince(lastToggleAt) >= Self.toggleWindow else { return false }
-        lastToggleAt = now
-        return true
+        press.claim()
     }
 
     private func resume() -> Bool {

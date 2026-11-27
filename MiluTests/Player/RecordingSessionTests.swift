@@ -72,10 +72,43 @@ import Testing
         #expect(!session.finished)
     }
 
+    /// 決定・再生/一時停止ボタンと Now Playing の toggle が両方届いても、1 度だけ切り替わる
+    @Test func togglePlayCommandIgnoresTheSamePressTwice() async throws {
+        let clock = Box(DispatchTime.now())
+        let transport = StubTransport { request in
+            if request.url?.path.hasSuffix("/playback") == true {
+                return reply(request, 200, Self.playbackJSON)
+            }
+            return reply(request, 200, "")
+        }
+        let (session, app) = try recordingSession(transport, clock: { clock.value })
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        report(1, to: session)
+        #expect(session.isPlaying)
+
+        // 決定で一時停止
+        #expect(session.togglePlayCommand())
+        #expect(!session.isPlaying)
+
+        // 同じ押下が Now Playing から届いても、止まったまま
+        clock.value = clock.value + 0.1
+        #expect(session.togglePlayCommand())
+        #expect(!session.isPlaying)
+
+        // 間をあけた押下で再生する
+        clock.value = clock.value + 1
+        #expect(session.togglePlayCommand())
+        #expect(session.isPlaying)
+
+        await session.close()
+    }
+
     private func recordingSession(
         _ transport: StubTransport,
         startStream: @escaping (StreamLoader) -> Void = { _ in },
-        waitForChapterRetry: @escaping (Duration) async -> Void = { _ in }
+        waitForChapterRetry: @escaping (Duration) async -> Void = { _ in },
+        clock: @escaping () -> DispatchTime = { .now() }
     ) throws -> (RecordingSession, AppModel) {
         let (app, defaults) = makeApp(transport)
         let session = RecordingSession(
@@ -87,7 +120,8 @@ import Testing
             defaults: defaults,
             nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()),
             startStream: startStream,
-            waitForChapterRetry: waitForChapterRetry
+            waitForChapterRetry: waitForChapterRetry,
+            clock: clock
         )
         return (session, app)
     }

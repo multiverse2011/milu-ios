@@ -133,6 +133,8 @@ final class RecordingSession {
     /// (denpa の api.md「rung」: 混んでいて断られたら今のストリームをそのまま続ける)
     private var trialLoader: StreamLoader?
     private var trialFrom: Double = 0
+    /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたかの控え
+    private var press = PressGuard()
 
     init(
         baseURL: URL,
@@ -145,7 +147,8 @@ final class RecordingSession {
         defaults: UserDefaults = .standard,
         nowPlaying: NowPlayingController = .shared,
         startStream: @escaping (StreamLoader) -> Void = { $0.start() },
-        waitForChapterRetry: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        waitForChapterRetry: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        clock: @escaping () -> DispatchTime = { .now() }
     ) {
         self.baseURL = baseURL
         self.token = token
@@ -162,6 +165,7 @@ final class RecordingSession {
         self.policy = RecordingPlaybackPolicy(playable: playable)
         self.cmSkipEnabled = recording.cmReliable
         self.captionsOn = defaults.object(forKey: "captionsOn") as? Bool ?? true
+        self.press.now = clock
     }
 
     // MARK: - 開く
@@ -432,9 +436,13 @@ final class RecordingSession {
         return true
     }
 
+    /// 決定・再生/一時停止ボタンと Now Playing の toggle は、同じ押下ならここへ 2 度来る。
+    /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
     @discardableResult
     func togglePlayCommand() -> Bool {
         guard !closed, stop == nil, !finished else { return false }
+        // 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
+        guard press.claim() else { return true }
         if isPlaying || (phase == .loading && !pendingPause) {
             return pause()
         }
