@@ -179,7 +179,7 @@ final class GuideModel: ProgramSheetModel {
         isTVGuide = true
         let day = GuideLayout.broadcastDay(for: now)
         if tvBase == nil { tvBase = day }
-        await tvReload(center: tvCenter ?? day)
+        await tvReload(center: tvCenter ?? day, now: now)
     }
 
     /// 種別を切り替える。窓は TV 側が読み直す。新しい表が来るまでは今の表を出しておく
@@ -194,7 +194,7 @@ final class GuideModel: ProgramSheetModel {
     /// カーソルの日の前後 1 日ずつ (チップに出る日の範囲まで) を読み、1 つの表につなぐ。
     /// 持っていない日だけ読む (`force` なら持っている日も読み直す)。1 日失敗しても、
     /// 他の日と今ある範囲はそのまま使う (足りない日は次の読みで取り直す)
-    func tvReload(center: Date, force: Bool = false) async {
+    func tvReload(center: Date, now: Date = Date(), force: Bool = false) async {
         tvGeneration += 1
         let generation = tvGeneration
         isTVGuide = true
@@ -208,7 +208,7 @@ final class GuideModel: ProgramSheetModel {
             return
         }
         guard generation == tvGeneration, let base = tvBase else { return }
-        let last = GuideLayout.menuDays(now: Date(), until: tvGuide?.until).last ?? base
+        let last = GuideLayout.menuDays(now: now, until: tvGuide?.until).last ?? base
         let days = GuideLayout.tvWindowDays(center: center, first: base, last: last)
         guard !days.isEmpty else { return }
         var failed = false

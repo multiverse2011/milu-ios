@@ -217,19 +217,20 @@ struct GuideLayoutTests {
     }
 
     @Test func tvWindowAroundCursor() {
-        // チップに出る日は 0 時の日付 (14〜21)。カーソルの日の前後 1 日ずつ
+        // チップに出る日は 0 時の日付 (14〜21)。center も放送日そのもの (0:00) を渡す
         let first = date(14, 0)
         let last = date(21, 0)
-        #expect(GuideLayout.tvWindowDays(center: date(14, 15), first: first, last: last) == [date(14, 0), date(15, 0)])
-        #expect(GuideLayout.tvWindowDays(center: date(15, 15), first: first, last: last) == [date(14, 0), date(15, 0), date(16, 0)])
-        // 4:00 より前は前の放送日がカーソルの日
-        #expect(GuideLayout.tvWindowDays(center: date(16, 2), first: first, last: last) == [date(14, 0), date(15, 0), date(16, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(14, 0), first: first, last: last) == [date(14, 0), date(15, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(15, 0), first: first, last: last) == [date(14, 0), date(15, 0), date(16, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(16, 0), first: first, last: last) == [date(15, 0), date(16, 0), date(17, 0)])
+        // 4:00 より前は前の放送日。呼び出し側が broadcastDay で丸める
+        #expect(GuideLayout.broadcastDay(for: date(16, 2), calendar: calendar) == date(15, 0))
         // 最後の日はそこで止める
-        #expect(GuideLayout.tvWindowDays(center: date(21, 15), first: first, last: last) == [date(20, 0), date(21, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(21, 0), first: first, last: last) == [date(20, 0), date(21, 0)])
         // until で最後の日が縮んだとき
-        #expect(GuideLayout.tvWindowDays(center: date(16, 15), first: first, last: date(16, 0)) == [date(15, 0), date(16, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(16, 0), first: first, last: date(16, 0)) == [date(15, 0), date(16, 0)])
         // 起点の日より前は持たない
-        #expect(GuideLayout.tvWindowDays(center: date(15, 15), first: date(15, 0), last: last) == [date(15, 0), date(16, 0)])
+        #expect(GuideLayout.tvWindowDays(center: date(15, 0), first: date(15, 0), last: last) == [date(15, 0), date(16, 0)])
     }
 
     @Test func dayHeading() {
