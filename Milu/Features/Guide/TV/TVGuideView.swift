@@ -91,10 +91,6 @@ private struct TVGuideBoard: View {
     @State private var animationToken = 0
     /// 動きの連鎖が続いているか。範囲を畳むのは連鎖が終わったときだけ
     @State private var isAnimating = false
-    /// 最後に上下でカーソルを動かした時刻。焦点の仕組みが同じ押下で焦点を動かしたとき、
-    /// 移動の当人 (move) が動かしたかを言い分けるのに使う
-    /// shortcut: 同じ押下かを 0.15 秒で見分ける、焦点と move の順序が分かる API が出たら差し替える
-    @State private var lastVerticalMove = Date.distantPast
     @State private var viewport = CGSize.zero
     @State private var didScroll = false
 
@@ -141,17 +137,14 @@ private struct TVGuideBoard: View {
         .onChange(of: focus) { old, new in
             guard case .column(let column) = new else {
                 // 列からチップへ焦点が抜けた。上を押すと焦点の仕組みが格子の外 (チップ) へ
-                // 焦点を移し、move が呼ばれないことがある (カーソルが上へ動かない)。
-                // ここでカーソルを上へ動かして格子へ戻す。一番上の番組からは動かせないので、
-                // そのままチップへ渡す
+                // 焦点を移すので move は呼ばれない。上を動かす担い手はここだけにする
+                // (move は下だけ)。ここでカーソルを上へ動かして格子へ戻す。一番上の番組からは
+                // 動かせないので、そのままチップへ渡す
                 if case .some(.column(let previous)) = old, case .some = new,
                    GuideCursorMotion.isUsable(previous, in: guide.services),
                    let current = resolvedCursor(now: Date()),
                    let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
-                    // 同じ押下で move が動かしていれば、二重に動かさない
-                    if Date().timeIntervalSince(lastVerticalMove) > 0.15 {
-                        animate(to: up, in: guide.services)
-                    }
+                    animate(to: up, in: guide.services)
                     focus = .column(up.column)
                     return
                 }
@@ -526,19 +519,16 @@ private struct TVGuideBoard: View {
 
     // MARK: フォーカスと送り
 
-    /// 上下だけを持つ。左右は tvOS の焦点の仕組み (列ごとの的) が動かし、青枠は焦点の移りで決める
+    /// 下だけを持つ。上は「列からチップへ焦点が抜けた」処理 (onChange(of: focus)) が動かし、
+    /// 左右は tvOS の焦点の仕組み (列ごとの的) が動かす
     private func move(_ direction: MoveCommandDirection) {
         // 焦点が既にチップなどへ抜けていれば、見えないカーソルを動かさない
-        guard direction == .up || direction == .down,
+        guard direction == .down,
               let current = resolvedCursor(now: Date()),
               focus == .column(current.column)
         else { return }
-        if let next = GuideCursorMotion.vertical(current, in: guide.services, by: direction == .up ? -1 : 1) {
-            lastVerticalMove = Date()
+        if let next = GuideCursorMotion.vertical(current, in: guide.services, by: 1) {
             animate(to: next, in: guide.services)
-        } else if direction == .up {
-            // 一番上の番組からは、上の段 (日付) へ抜ける
-            focus = .day(model.selectedDay)
         }
     }
 
