@@ -108,14 +108,15 @@ private struct TVGuideBoard: View {
         // 読み直しで局が減ると表の幅が縮む。古い送り位置のままだと全部が画面の外に出る
         .onChange(of: guide.services.count) { _, _ in
             scroll = CGPoint(x: clampX(scroll.x), y: scroll.y)
+            // 局が減って焦点の列が消えると、的が無くなって格子が無反応になる。居られる列へ移す
+            if case .column(let column) = focus, column >= guide.services.count {
+                focus = resolvedCursor(now: Date()).map { .column($0.column) }
+            }
         }
-        // 焦点が列に移ったら、基準の時刻でその列の番組を選ぶ (左右の移動と、格子に入ったとき)
+        // 焦点が列に移ったら、基準の時刻でその列の番組を選ぶ。左右の移動はこれだけで決める
         .onChange(of: focus) { _, new in
-            guard case .column(let column) = new,
-                  let base = resolvedCursor(now: Date()),
-                  let next = GuideCursorMotion.cursor(at: column, anchor: base.anchor, in: guide.services),
-                  next != cursor
-            else { return }
+            guard case .column(let column) = new, let base = resolvedCursor(now: Date()) else { return }
+            let next = GuideCursorMotion.horizontal(base, in: guide.services, by: column - base.column) ?? base
             cursor = next
             follow(next)
         }
@@ -250,19 +251,24 @@ private struct TVGuideBoard: View {
     private func focusTargets(size: CGSize, now: Date) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(columnRange(size: size)), id: \.self) { column in
+                let usable = !guide.services[column].programs.isEmpty
                 Color.clear
                     .frame(width: GuideLayout.tvColumnWidth, height: size.height)
                     .contentShape(Rectangle())
-                    .focusable(!guide.services[column].programs.isEmpty)
+                    // 焦点が当たっている列は、読み直しで番組が消えても的を残す
+                    // (的が無くなると focus が nil になり、格子がどの押下にも応えなくなる)
+                    .focusable(usable || focus == .column(column))
                     .focusEffectDisabled()
                     .focused($focus, equals: .column(column))
-                    .onMoveCommand { move($0, now: now) }
-                    .onTapGesture { open(now: now) }
+                    .onMoveCommand { move($0) }
+                    .onTapGesture { open(column: column, now: now) }
                     // 列は 1 つのまとまりなので、読み上げはその列で選んでいる番組だけにする
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(cursorLabel(column: column, now: now))
                     .accessibilityAddTraits(.isButton)
-                    .accessibilityAction { open(now: now) }
+                    .accessibilityAction { open(column: column, now: now) }
+                    // 番組の無い列は読み上げない (決定しても開くものが無い)
+                    .accessibilityHidden(!usable)
                     .offset(x: GuideLayout.tvTimeWidth + Double(column) * columnStep() - scroll.x)
             }
         }
@@ -345,11 +351,18 @@ private struct TVGuideBoard: View {
         )
     }
 
+    /// いまのカーソル。読み直しで番組が消えていたら、焦点の当たっている列で作り直す
+    /// (先頭の局へ戻すと、焦点の列と食い違って格子の入力が止まる)
     private func resolvedCursor(now: Date) -> GuideCursor? {
         if let cursor, GuideCursorMotion.program(cursor, in: guide.services) != nil {
             return cursor
         }
-        return GuideCursorMotion.initial(in: guide.services, now: Int64(now.timeIntervalSince1970 * 1000))
+        let time = Int64(now.timeIntervalSince1970 * 1000)
+        if case .column(let column) = focus,
+           let rebuilt = GuideCursorMotion.cursor(at: column, anchor: cursor?.anchor ?? time, in: guide.services) {
+            return rebuilt
+        }
+        return GuideCursorMotion.initial(in: guide.services, now: time)
     }
 
     // MARK: 作る範囲
@@ -389,59 +402,65 @@ private struct TVGuideBoard: View {
 
     // MARK: フォーカスと送り
 
-    private func move(_ direction: MoveCommandDirection, now: Date) {
-        let services = guide.services
-        // 焦点が既に別の列へ移っていれば、tvOS の焦点の仕組みが動かしている。二重に動かさない
-        guard let current = resolvedCursor(now: now), focus == .column(current.column) else { return }
-        switch direction {
-        case .left, .right:
-            // 焦点は列ごとの的が持つ。隣の列へ渡すだけで、青枠は焦点の移りで描く
-            if let next = GuideCursorMotion.horizontal(current, in: services, by: direction == .left ? -1 : 1) {
-                focus = .column(next.column)
-            }
-        case .up, .down:
-            if let next = GuideCursorMotion.vertical(current, in: services, by: direction == .up ? -1 : 1) {
-                cursor = next
-                follow(next)
-            } else if direction == .up {
-                // 一番上の番組からは、上の段 (日付) へ抜ける
-                focus = .day(model.selectedDay)
-            }
-        default:
-            break
+    /// 上下だけを持つ。左右は tvOS の焦点の仕組み (列ごとの的) が動かし、青枠は焦点の移りで決める
+    private func move(_ direction: MoveCommandDirection) {
+        guard direction == .up || direction == .down,
+              let current = resolvedCursor(now: Date())
+        else { return }
+        if let next = GuideCursorMotion.vertical(current, in: guide.services, by: direction == .up ? -1 : 1) {
+            cursor = next
+            follow(next)
+        } else if direction == .up {
+            // 一番上の番組からは、上の段 (日付) へ抜ける
+            focus = .day(model.selectedDay)
         }
     }
 
-    private func open(now: Date) {
-        guard let cursor = resolvedCursor(now: now),
-              let (column, program) = GuideCursorMotion.program(cursor, in: guide.services)
-        else { return }
-        onOpen(GuideProgramItem(service: guide.services[column], program: program))
+    /// その列で選ぶ番組 (基準の時刻から)
+    private func program(column: Int, now: Date) -> GuideProgramItem? {
+        guard let base = resolvedCursor(now: now),
+              let cursor = GuideCursorMotion.cursor(at: column, anchor: base.anchor, in: guide.services),
+              let (c, program) = GuideCursorMotion.program(cursor, in: guide.services)
+        else { return nil }
+        return GuideProgramItem(service: guide.services[c], program: program)
+    }
+
+    /// 決定。焦点の列 (タップした列) の番組を開く
+    private func open(column: Int, now: Date) {
+        guard let item = program(column: column, now: now) else { return }
+        onOpen(item)
     }
 
     /// 読み上げる字 (その列で選んでいるマス)
     private func cursorLabel(column: Int, now: Date) -> String {
-        guard let base = resolvedCursor(now: now),
-              let cursor = GuideCursorMotion.cursor(at: column, anchor: base.anchor, in: guide.services),
-              let (c, program) = GuideCursorMotion.program(cursor, in: guide.services)
-        else { return String(localized: "番組表") }
-        let time = Wording.time(Date(timeIntervalSince1970: Double(program.startAt) / 1000), calendar: GuideLayout.calendar)
-        return "\(guide.services[c].name) \(time) \(program.name)"
+        guard let item = program(column: column, now: now) else { return String(localized: "番組表") }
+        let time = Wording.time(Date(timeIntervalSince1970: Double(item.startAt) / 1000), calendar: GuideLayout.calendar)
+        return "\(item.serviceName) \(time) \(item.name)"
     }
 
-    /// フォーカスの当たっている列が枠に入る所まで横に送り、縦は基準の時刻が画面に残る所まで送る。
-    /// 縦をマスの端に合わせると、横に動くたび (マスが変わっても基準は同じ) 表示時刻が揺れる
+    /// フォーカスの当たっている列を枠に入れ、その左右の次の列 (番組のある列) を少し見える所まで
+    /// 横に送る。tvOS の焦点はクリップの外の的へは移れないので、次へ移れる分を先に出しておく。
+    /// 縦は基準の時刻が画面に残る所まで送る (マスの端に合わせると、横に動くたび時刻が揺れる)
     private func follow(_ cursor: GuideCursor) {
         guard let (column, _) = GuideCursorMotion.program(cursor, in: guide.services) else { return }
         let margin = 40.0
-        let left = Double(column) * columnStep()
-        let right = left + GuideLayout.tvColumnWidth
         let visibleWidth = max(Double(viewport.width) - GuideLayout.tvTimeWidth, 1)
         var x = scroll.x
+        let left = Double(column) * columnStep()
+        let right = left + GuideLayout.tvColumnWidth
         if left < x + margin {
             x = left - margin
         } else if right > x + visibleWidth - margin {
             x = right - visibleWidth + margin
+        }
+        // 次に移る列を margin だけ見せる
+        if let next = GuideCursorMotion.adjacentColumn(from: column, in: guide.services, by: 1),
+           Double(next) * columnStep() > x + visibleWidth - margin {
+            x = Double(next) * columnStep() - visibleWidth + margin
+        }
+        if let previous = GuideCursorMotion.adjacentColumn(from: column, in: guide.services, by: -1),
+           Double(previous) * columnStep() + GuideLayout.tvColumnWidth < x + margin {
+            x = Double(previous) * columnStep() + GuideLayout.tvColumnWidth - margin
         }
         let anchorY = GuideLayout.offset(
             of: Double(cursor.anchor),

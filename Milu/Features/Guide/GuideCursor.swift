@@ -13,7 +13,8 @@ struct GuideCursor: Equatable, Sendable {
 /// 上下に動いたら基準の時刻も移った番組の開始に合わせ直す (純正の番組表と同じ)。
 /// 端では動かない (`nil`)。
 nonisolated enum GuideCursorMotion {
-    /// 開いたときのフォーカス。先頭の局でいま放送中の番組 (無ければ先頭の番組)。
+    /// 開いたときのフォーカス。先頭の局で、いま放送中の番組。無ければ、いままでで最後に始まった
+    /// 番組 (それも無ければ先頭の番組)。
     /// 基準の時刻はいま。他の日を出しているときはいまが番組の外なので、その番組の端にする
     static func initial(in services: [GuideService], now: Int64) -> GuideCursor? {
         guard let column = services.firstIndex(where: { !$0.programs.isEmpty }),
@@ -53,15 +54,23 @@ nonisolated enum GuideCursorMotion {
         return GuideCursor(column: column, programID: target.id, anchor: target.startAt)
     }
 
-    /// 左右。基準の時刻に入っている番組を隣の局で探す。番組の無い局は飛ばす。
+    /// 左右。基準の時刻に入っている番組を `delta` だけ先の局で探す。番組の無い局は飛ばす。
+    /// tvOS の焦点が移った列を渡すときは、いまの列との差を `delta` にする。
     static func horizontal(_ cursor: GuideCursor, in services: [GuideService], by delta: Int) -> GuideCursor? {
-        guard let (column, _) = program(cursor, in: services) else { return nil }
+        guard let (column, _) = program(cursor, in: services),
+              let next = adjacentColumn(from: column, in: services, by: delta)
+        else { return nil }
+        return Self.cursor(at: next, anchor: cursor.anchor, in: services)
+    }
+
+    /// 隣の、番組のある列。無ければ `nil`。
+    static func adjacentColumn(from column: Int, in services: [GuideService], by delta: Int) -> Int? {
+        guard delta != 0 else { return nil }
         var next = column + delta
         while services.indices.contains(next), services[next].programs.isEmpty {
             next += delta
         }
-        guard next != column else { return nil }
-        return self.cursor(at: next, anchor: cursor.anchor, in: services)
+        return services.indices.contains(next) ? next : nil
     }
 
     /// その時刻に入っている番組。無ければ、その時刻までで最後に始まった番組 (それも無ければ先頭)。

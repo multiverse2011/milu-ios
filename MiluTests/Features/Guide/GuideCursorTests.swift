@@ -89,6 +89,31 @@ struct GuideCursorTests {
         #expect(third?.programID == 5)
     }
 
+    @Test func horizontalAfterVerticalUsesTheMovedProgram() {
+        // 上下に動いたら基準の時刻も移った番組の開始になる。そのあとの横移動はその時刻で選ぶ
+        let hour: Int64 = 3_600_000
+        let stations = [
+            service(1, [(id: 1, start: 10 * hour, end: 12 * hour)]),
+            service(2, [(id: 2, start: 9 * hour, end: 11 * hour),
+                        (id: 3, start: 11 * hour, end: 13 * hour)]),
+            service(3, [(id: 4, start: 10 * hour, end: 10 * hour + 50 * 60_000),
+                        (id: 5, start: 10 * hour + 50 * 60_000, end: 12 * hour)]),
+        ]
+        let first = GuideCursorMotion.initial(in: stations, now: 10 * hour + 45 * 60_000)
+        let second = first.flatMap { GuideCursorMotion.horizontal($0, in: stations, by: 1) }
+        #expect(second?.programID == 2)
+        let down = second.flatMap { GuideCursorMotion.vertical($0, in: stations, by: 1) }
+        #expect(down == GuideCursor(column: 1, programID: 3, anchor: 11 * hour))
+        let next = down.flatMap { GuideCursorMotion.horizontal($0, in: stations, by: 1) }
+        // 入ったときの 10:45 ではなく、下がった番組の開始 (11:00) で局 C を選ぶ
+        #expect(next?.programID == 5)
+    }
+
+    @Test func initialAnchorIsClampedToTheProgram() {
+        // いまが全番組より後なら、基準は最後の番組の終わりに丸める
+        #expect(GuideCursorMotion.initial(in: services, now: 14 * 3_600_000) == GuideCursor(column: 0, programID: 3, anchor: 13 * 3_600_000))
+    }
+
     @Test func initialSkipsEmptyColumns() {
         let empty = service(1, [])
         let filled = service(2, [(id: 7, start: 10 * 3_600_000, end: 11 * 3_600_000)])
@@ -104,6 +129,17 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.horizontal(GuideCursor(column: 1, programID: 4, anchor: 10 * 3_600_000), in: list, by: 1) == GuideCursor(column: 3, programID: 8, anchor: 10 * 3_600_000))
         // 端に番組が無ければ動かない
         #expect(GuideCursorMotion.horizontal(GuideCursor(column: 3, programID: 8, anchor: 10 * 3_600_000), in: list, by: 1) == nil)
+    }
+
+    @Test func horizontalSkipsSeveralEmptyColumns() {
+        // 番組の無い局が続いても、次の番組のある局まで飛ばす
+        var list = services
+        list.append(service(3, []))
+        list.append(service(4, []))
+        list.append(service(5, [(id: 9, start: 10 * 3_600_000, end: 12 * 3_600_000)]))
+        #expect(GuideCursorMotion.horizontal(GuideCursor(column: 1, programID: 4, anchor: 10 * 3_600_000), in: list, by: 1) == GuideCursor(column: 4, programID: 9, anchor: 10 * 3_600_000))
+        // 動かさない (delta 0) では何もしない
+        #expect(GuideCursorMotion.horizontal(GuideCursor(column: 1, programID: 4, anchor: 10 * 3_600_000), in: list, by: 0) == nil)
     }
 
     @Test func staleCursorIsNotFound() {
