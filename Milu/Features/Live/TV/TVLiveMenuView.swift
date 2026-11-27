@@ -181,7 +181,6 @@ struct TVLiveMenuView: View {
     }
 
     private func stationCard(_ service: Service) -> some View {
-        let isFocused = focus == .station(service.id)
         let isCurrent = service.id == model.current?.id
         return Button {
             onSelect(service)
@@ -197,13 +196,21 @@ struct TVLiveMenuView: View {
                     TVServiceLogo(service: service, baseURL: baseURL, token: token)
                     Spacer(minLength: 8)
                     marks(service)
-                    if isCurrent, model.isPlaybackOpen {
-                        Text("視聴中")
-                            .font(.system(size: 21, weight: .bold))
-                            .foregroundStyle(TVTheme.ink)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                    if isCurrent {
+                        if model.isPlaybackOpen {
+                            Text("視聴中")
+                                .font(.system(size: 21, weight: .bold))
+                                .foregroundStyle(TVTheme.ink)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                        } else {
+                            // 枠の代わりの印。再生していない間は「いま選んである局」だけを示す
+                            Image(systemName: "play.tv.fill")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(Text("いま選んでいる局"))
+                        }
                     }
                 }
                 Text(service.name)
@@ -218,23 +225,8 @@ struct TVLiveMenuView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
             .frame(width: 440, height: 180, alignment: .topLeading)
-            .background(
-                isCurrent ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 20)
-            )
-            .overlay {
-                if isCurrent || isFocused {
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(
-                            Color.accentColor.opacity(isFocused ? 1 : 0.6),
-                            lineWidth: isFocused ? 5 : 2
-                        )
-                }
-            }
-            .scaleEffect(isFocused ? 1.06 : 1)
         }
-        .buttonStyle(TVPlainButtonStyle())
-        .focusEffectDisabled()
+        .buttonStyle(.card)
         .focused($focus, equals: .station(service.id))
     }
 
