@@ -220,7 +220,7 @@ struct TVLiveMenuView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
-            .frame(width: 440, height: 180, alignment: .topLeading)
+            .frame(width: 440, height: 200, alignment: .topLeading)
         }
         .buttonStyle(.card)
         .focused($focus, equals: .station(service.id))
