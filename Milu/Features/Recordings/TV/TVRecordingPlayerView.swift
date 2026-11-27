@@ -6,7 +6,7 @@ import SwiftUI
 /// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
 /// 操作の列の高さ (controlsHeight) から字幕の持ち上げ量を決めているので、題と操作の列の字は固定の大きさのままにする。
-/// 題だけは放送の字なので .title2 に揃える (旧 44pt。その差は controlsHeight に足してある)。
+/// 題だけは放送の字なので .title2 に揃える (旧 44pt。行の高さの差は controlsHeight に足してある)。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
     /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
@@ -171,7 +171,7 @@ struct TVRecordingPlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// 字幕を持ち上げる量。操作の列 (下から約 353pt) の上へ、字幕の面の字の下端が来るようにする
+    /// 字幕を持ち上げる量。操作の列 (下から約 355pt) の上へ、字幕の面の字の下端が来るようにする
     private func captionLift(height: CGFloat) -> CGFloat {
         guard height > 0, let page = session.captionPage else { return 0 }
         let span = CaptionLayout.inkSpan(page: page)
@@ -180,8 +180,9 @@ struct TVRecordingPlayerView: View {
     }
 
     /// 操作の列の高さの見積り (題・シークバー・時刻・札・下の余白)。
-    /// 340 は題が旧 44pt のときの値。DenpaFont を .title2 (tvOS で 57pt) にした差 13 を足す
-    private static let controlsHeight: CGFloat = 353
+    /// 340 は題が旧 44pt のときの値。DenpaFont の行の高さ (1.122 × 大きさ) の差 14.6 を足す。
+    /// 題が 2 行になると差は約 29 になる (340 は 1 行の前提なので、実寸は画面で測る)
+    private static let controlsHeight: CGFloat = 355
 
     // MARK: - 操作の層
 
