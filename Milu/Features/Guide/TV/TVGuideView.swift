@@ -120,6 +120,9 @@ private struct TVGuideBoard: View {
         // 読み直しで局が減ると表の幅が縮む。古い送り位置のままだと全部が画面の外に出る
         .onChange(of: guide.services.count) { _, _ in
             let target = CGPoint(x: clampX(scroll.x), y: scroll.y)
+            // 走っている動きを止められるのは送り先が変わるときだけ。同じ値のまま範囲だけ
+            // 畳むと、残りの動きで作られていない列・行が出る (マスが欠ける)
+            guard target != scroll || !isAnimating else { return }
             withAnimation(nil) {
                 scroll = target
                 scrollLow = target
@@ -605,7 +608,8 @@ private struct TVGuideBoard: View {
         return CGPoint(x: clampX(x), y: clampY(y))
     }
 
-    /// 送る。`animated` が false のときは即座に送り、動きの範囲も畳む (開いたとき・後始末)
+    /// 送る。`animated` が false のときは即座に送り、動きの範囲も畳む (開いたとき・後始末)。
+    /// 動いている最中に送り先が同じなら、何もしない (範囲だけ畳むとマスが欠ける)
     private func follow(_ cursor: GuideCursor, in services: [GuideService], animated: Bool) {
         guard let target = followTarget(cursor, in: services) else { return }
         if animated {
@@ -613,7 +617,9 @@ private struct TVGuideBoard: View {
             scrollLow = CGPoint(x: min(scrollLow.x, target.x), y: min(scrollLow.y, target.y))
             scrollHigh = CGPoint(x: max(scrollHigh.x, target.x), y: max(scrollHigh.y, target.y))
             scroll = target
-        } else {
+        } else if target != scroll || !isAnimating {
+            // 走っている動きを止められるのは送り先が変わるときだけ。同じ値のまま範囲だけ
+            // 畳むと、残りの動きで作られていない列・行が出る (マスが欠ける)
             withAnimation(nil) {
                 isAnimating = false
                 scrollLow = target
