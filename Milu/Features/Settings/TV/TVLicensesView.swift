@@ -13,7 +13,8 @@ struct TVLicensesView: View {
                 TVReadingText(
                     text: AppInfo.license,
                     font: .system(.footnote, design: .monospaced),
-                    lineSpacing: 8
+                    lineSpacing: 8,
+                    scalesWithTextSize: true
                 )
                 .padding(.top, 10)
             }
