@@ -101,7 +101,7 @@ private struct TVGuideBoard: View {
     @State private var isAnimating = false
     @State private var viewport = CGSize.zero
     @State private var didScroll = false
-    /// 最後に前の日を読みにいったカーソルの放送日 (日の変わり目で 1 度だけ先読みする)
+    /// 最後に先読みしたカーソルの放送日 (同じ日の読みを重ねない)
     @State private var loadedCenterDay: Date?
 
     private var from: Double { Double(model.tvFrom) }
@@ -455,7 +455,7 @@ private struct TVGuideBoard: View {
                         .zIndex(focused?.column == column && focused?.programID == cell.item.id ? 1 : 0)
                 }
             }
-            // 放送日の境目 (翌 4:00) に線を引く (時刻の列の日付の見出しと対)
+            // 各放送日の 4:00 に線を引く (時刻の列の日付の見出しと対)。先頭の日は y=0 なので引かない
             ForEach(model.tvDays, id: \.self) { day in
                 let start = GuideLayout.broadcastRange(for: day).from
                 if start > Int64(from) {
@@ -645,11 +645,17 @@ private struct TVGuideBoard: View {
 
     /// 上は列から上の的へ焦点が移ったときだけ処理する。
     private func moveUp(from column: Int) {
-        if let base = resolvedCursor(now: Date()),
-           let current = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
-           let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
+        let current = resolvedCursor(now: Date()).flatMap {
+            GuideCursorMotion.selectedCursor(inColumn: column, from: $0, in: guide.services)
+        }
+        if let current, let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
             lastColumn = column
             animate(to: up, in: guide.services)
+            focus = .column(column)
+        } else if let current, let base = model.tvBase, let first = model.tvDays.first, first > base {
+            // 前の日を読む間は格子に留まる。
+            loadedCenterDay = nil
+            prefetch(current)
             focus = .column(column)
         } else {
             lastColumn = nil
@@ -694,7 +700,8 @@ private struct TVGuideBoard: View {
         }
     }
 
-    /// 端に近づいたら隣の日を先に読む。カーソルの放送日が変わったときだけ (同じ日では何もしない)
+    /// カーソルの放送日が変わったら隣の日を先に読む (4:00 で止まらないように)。
+    /// 同じ日のうちは何もしない。端で押されたときは `loadedCenterDay` を消して呼び直す
     private func prefetch(_ cursor: GuideCursor) {
         let day = GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double(cursor.anchor) / 1000))
         if let loadedCenterDay, GuideLayout.calendar.isDate(day, inSameDayAs: loadedCenterDay) { return }
@@ -702,7 +709,8 @@ private struct TVGuideBoard: View {
         Task { await model.tvReload(center: day) }
     }
 
-    /// 日付のチップ。その日を読み直してから、今日なら今の時刻・他の日は 4:00 へ飛ぶ
+    /// 日付のチップ。その日を持っていなければ読み込んでから、今日なら今の時刻・他の日は 4:00 へ飛ぶ。
+    /// 自分の読みが採用されなかった (別の読みに追い越された・中心が読めなかった) ときは飛ばない
     private func select(day: Date) {
         let now = Date()
         let time: Int64
@@ -713,12 +721,13 @@ private struct TVGuideBoard: View {
         }
         loadedCenterDay = day
         Task {
-            await model.tvReload(center: day)
-            jump(to: time)
+            if await model.tvReload(center: day) {
+                jump(to: time)
+            }
         }
     }
 
-    /// 種別のチップ。いまいた日のまわりを読み直す (表は新しいのが来るまでそのまま)
+    /// 種別のチップ。いまいた日のまわりを読み直す (読み込み中も今の表をそのまま出す)
     private func select(type: ServiceType) {
         guard type != model.selectedType else { return }
         let now = Date()
@@ -899,7 +908,7 @@ private struct TVGuideBoard: View {
         }
     }
 
-    /// 開いたときと、日付・種別を替えたとき。今日ならいまの線が上から 1/4 の所へ送る (3.5)。
+    /// 開いて大きさが決まったときに一度だけ。今日ならいまの線が上から 1/4 の所へ送る (3.5)。
     /// カーソルはここで置き、操作しないうちに時刻が進んでも枠が動かないようにする。
     /// ここは動かさない (即座に置き直す)
     private func reset() {
@@ -924,7 +933,8 @@ private struct TVGuideBoard: View {
     }
 
     private func clampY(_ y: Double) -> Double {
-        // 表の先頭は、持っている最初の日 (遠くのチップへ飛んだときは起点の日より後)
+        // 送りの上限。持っている最初の日より前 (読めていない空の日) は見せない。
+        // 座標の起点 (tvFrom) は開いた日で固定なので、遠くのチップへ飛ぶとこの上限が起点より後になる
         let top = model.tvDays.first.map {
             GuideLayout.offset(
                 of: Double(GuideLayout.broadcastRange(for: $0).from),

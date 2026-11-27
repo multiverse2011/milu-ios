@@ -51,7 +51,7 @@ final class GuideModel: ProgramSheetModel {
     /// 一覧を取れなかった (3.5 の「繋がらない」)
     private(set) var didFail = false
 
-    // MARK: tvOS の窓 (TV-Guide)。1 日ずつ読んで、1 つの表につなぐ
+    // MARK: tvOS の窓 (状態)。1 日ずつ読んで、1 つの表につなぐ
 
     /// 表の始まりの放送日。開いたときに決め、セッション中は動かさない (送りの座標がずれないように)
     private(set) var tvBase: Date?
@@ -63,6 +63,9 @@ final class GuideModel: ProgramSheetModel {
     private var tvGeneration = 0
     /// 最後に読みにいったカーソルの放送日 (SSE の読み直しに使う)
     private var tvCenter: Date?
+    /// 読み込み中の中心の日と本数 (同じ日の読みを重ねない)
+    private var tvLoadingCenter: Date?
+    private var tvLoadingCount = 0
     private var isTVGuide = false
 
     init(app: AppModel, now: Date = Date()) {
@@ -172,17 +175,15 @@ final class GuideModel: ProgramSheetModel {
         }
     }
 
-    // MARK: tvOS の窓 (TV-Guide)
+    // MARK: tvOS の窓 (読み)
 
-    /// tvOS の番組表を開く。窓はカーソルの日の前後 1 日ずつ
+    /// tvOS の番組表を開く。開いた日〜翌日を読む (前の日は読まない)
     func tvStart(now: Date = Date()) async {
-        isTVGuide = true
-        let day = GuideLayout.broadcastDay(for: now)
-        if tvBase == nil { tvBase = day }
-        await tvReload(center: tvCenter ?? day, now: now)
+        await tvReload(center: tvCenter ?? GuideLayout.broadcastDay(for: now), now: now)
     }
 
-    /// 種別を切り替える。窓は TV 側が読み直す。新しい表が来るまでは今の表を出しておく
+    /// 種別を切り替える。窓は TV 側が読み直す。読み込み中も今の表を出しておく
+    /// (中心が読めない初回は、次の読みがそろうまで表が無い)
     func tvSelectType(_ type: ServiceType) {
         guard type != selectedType else { return }
         selectedType = type
@@ -191,50 +192,65 @@ final class GuideModel: ProgramSheetModel {
         tvGeneration += 1
     }
 
-    /// カーソルの日の前後 1 日ずつ (チップに出る日の範囲まで) を読み、1 つの表につなぐ。
-    /// 持っていない日だけ読む (`force` なら持っている日も読み直す)。1 日失敗しても、
-    /// 他の日と今ある範囲はそのまま使う (足りない日は次の読みで取り直す)
-    func tvReload(center: Date, now: Date = Date(), force: Bool = false) async {
+    /// カーソルの放送日 (`center`) の前後 1 日ずつを、開いた日〜チップの最後の日の範囲で読み、
+    /// 1 つの表につなぐ。持っていない日だけ読む (`force` なら持っている日も読み直す)。
+    /// 先頭から連続して読めた日だけをつなぎ、足りない日は次の読みで取り直す。
+    /// 中心が読めなかったときは今の表を差し替えない。適用したら `true` を返す
+    @discardableResult
+    func tvReload(center: Date, now: Date = Date(), force: Bool = false) async -> Bool {
+        // 同じ日の読みが走っているなら重ねない (端の再試行で走っている読みを打ち切らない)
+        if !force, tvLoadingCount > 0, let loading = tvLoadingCenter,
+           GuideLayout.calendar.isDate(loading, inSameDayAs: center) {
+            return false
+        }
+        tvLoadingCount += 1
+        tvLoadingCenter = center
+        defer {
+            tvLoadingCount -= 1
+            if tvLoadingCount == 0 { tvLoadingCenter = nil }
+        }
         tvGeneration += 1
         let generation = tvGeneration
         isTVGuide = true
-        if tvBase == nil { tvBase = GuideLayout.broadcastDay(for: center) }
+        if tvBase == nil { tvBase = center }
         tvCenter = center
         do {
             try await loadTypesIfNeeded()
         } catch {
-            guard generation == tvGeneration else { return }
+            guard generation == tvGeneration else { return false }
             tvDidFail = true
-            return
+            return false
         }
-        guard generation == tvGeneration, let base = tvBase else { return }
+        guard generation == tvGeneration, let base = tvBase else { return false }
         let last = GuideLayout.menuDays(now: now, until: tvGuide?.until).last ?? base
         let days = GuideLayout.tvWindowDays(center: center, first: base, last: last)
-        guard !days.isEmpty else { return }
+        guard !days.isEmpty else { return false }
         var failed = false
         for day in days {
-            let key = GuideLayout.broadcastRange(for: day).from
-            if !force, tvResponses[key] != nil { continue }
+            let range = GuideLayout.broadcastRange(for: day)
+            if !force, tvResponses[range.from] != nil { continue }
             do {
-                let range = GuideLayout.broadcastRange(for: day)
                 let path = "api/programs?type=\(selectedType.rawValue)&from=\(range.from)&to=\(range.to)"
                 let data = try await app.get(path)
                 let decoded = try JSONDecoder().decode(GuideResponse.self, from: data)
-                guard generation == tvGeneration else { return }
-                tvResponses[key] = decoded
+                guard generation == tvGeneration else { return false }
+                tvResponses[range.from] = decoded
             } catch {
-                guard generation == tvGeneration else { return }
+                guard generation == tvGeneration else { return false }
                 failed = true
             }
         }
-        guard generation == tvGeneration else { return }
-        let keys = Set(days.map { GuideLayout.broadcastRange(for: $0).from })
+        guard generation == tvGeneration else { return false }
+        // 中心 (カーソルの日) が読めていないなら、いまの表をそのまま使う (1 日ぶん飛ばさない)
+        guard tvResponses[key(center)] != nil || tvGuide == nil else { return false }
+        let keys = Set(days.map { key($0) })
         tvResponses = tvResponses.filter { keys.contains($0.key) }
         // 途中に読めなかった日があれば、そこまでをつなぐ (間に空白を挟まない)
         let loaded = days.drop { tvResponses[key($0)] == nil }.prefix { tvResponses[key($0)] != nil }
         tvDays = Array(loaded)
         tvGuide = tvDays.isEmpty ? nil : Self.merge(tvDays.compactMap { tvResponses[key($0)] })
         tvDidFail = failed && tvGuide == nil
+        return true
     }
 
     private func key(_ day: Date) -> Int64 {
@@ -248,6 +264,10 @@ final class GuideModel: ProgramSheetModel {
         var services: [Int64: GuideService] = [:]
         var order: [Int64] = []
         var programs: [Int64: [Int64: GuideProgram]] = [:]
+        func hasMark(_ program: GuideProgram) -> Bool {
+            if case .some = program.reservation { return true }
+            return program.recordingId != nil
+        }
         for response in responses {
             for service in response.services {
                 if services.index(forKey: service.id) == nil {
@@ -256,6 +276,10 @@ final class GuideModel: ProgramSheetModel {
                     programs[service.id] = [:]
                 }
                 for program in service.programs {
+                    // 4:00 をまたぐ番組は両日に入る。予約・録画の印が載っている方を残す
+                    if let existing = programs[service.id]?[program.id], hasMark(existing), !hasMark(program) {
+                        continue
+                    }
                     programs[service.id]?[program.id] = program
                 }
             }

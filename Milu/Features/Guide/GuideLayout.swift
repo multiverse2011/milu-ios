@@ -122,7 +122,7 @@ nonisolated enum GuideLayout {
         return (y, offset(of: bottom, from: rangeStart, pointsPerMinute: ppm) - y)
     }
 
-    /// いまの線の位置 (pt)。いまが表の範囲の外なら `nil` (今日の表だけ出す)
+    /// いまの線の位置 (pt)。いまが表の範囲の外なら `nil` (いまの線は出さない)
     static func nowOffset(
         now: Double,
         rangeStart: Double,
@@ -171,7 +171,7 @@ nonisolated enum GuideLayout {
         return "\(calendar.component(.minute, from: now))"
     }
 
-    /// `date` が属する放送日 (その日の 4:00)。4:00 より前は前の日の番組表
+    /// `date` が属する放送日 (その日の 0:00)。4:00 より前は前の日の番組表
     static func broadcastDay(for date: Date, calendar: Calendar = GuideLayout.calendar) -> Date {
         let day = calendar.date(from: calendar.dateComponents([.year, .month, .day], from: date)) ?? date
         let hour = calendar.component(.hour, from: date)
@@ -188,16 +188,16 @@ nonisolated enum GuideLayout {
         return (Int64(start.timeIntervalSince1970 * 1000), Int64(end.timeIntervalSince1970 * 1000))
     }
 
-    /// tvOS の番組表で持つ放送日。カーソルの日の前後 1 日ずつで、`first`〜`last` (チップに出る日) の外は取らない
+    /// tvOS の番組表で持つ放送日。`center` (放送日そのもの。0:00) の前後 1 日ずつで、
+    /// `first` (表の起点の日)〜`last` (チップに出る最後の日) の外は取らない
     static func tvWindowDays(
         center: Date,
         first: Date,
         last: Date,
         calendar: Calendar = GuideLayout.calendar
     ) -> [Date] {
-        let day = broadcastDay(for: center, calendar: calendar)
-        let start = max(first, calendar.date(byAdding: .day, value: -1, to: day) ?? day)
-        let end = min(last, calendar.date(byAdding: .day, value: 1, to: day) ?? day)
+        let start = max(first, calendar.date(byAdding: .day, value: -1, to: center) ?? center)
+        let end = min(last, calendar.date(byAdding: .day, value: 1, to: center) ?? center)
         guard start <= end else { return [] }
         var days: [Date] = []
         var next = start
@@ -209,7 +209,7 @@ nonisolated enum GuideLayout {
         return days
     }
 
-    /// 時刻の列に出す日の見出し。「11/29」
+    /// 時刻の列に出す日の見出し。時刻の列 (70pt) に収めるため月/日だけの「11/29」
     static func dayHeading(for day: Date, calendar: Calendar = GuideLayout.calendar) -> String {
         "\(calendar.component(.month, from: day))/\(calendar.component(.day, from: day))"
     }
