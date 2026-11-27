@@ -67,6 +67,26 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.horizontal(GuideCursor(column: 1, programID: 4), in: services, by: 1) == nil)
     }
 
+    @Test func horizontalKeepsTheBaseTimeAcrossStations() {
+        // 局 B は 9:00 開始の 2 時間枠なので、そこから右へ動くと基準が 9:00 まで遡る。
+        // 横に続けて動いても、格子に入ったときの時刻 (10:45) で選ぶ
+        let hour: Int64 = 3_600_000
+        let stations = [
+            service(1, [(id: 1, start: 10 * hour, end: 12 * hour)]),
+            service(2, [(id: 2, start: 9 * hour, end: 11 * hour),
+                        (id: 3, start: 11 * hour, end: 13 * hour)]),
+            service(3, [(id: 4, start: 9 * hour, end: 10 * hour),
+                        (id: 5, start: 10 * hour, end: 12 * hour)]),
+        ]
+        let first = GuideCursorMotion.initial(in: stations, now: 10 * hour + 45 * 60_000)
+        #expect(first?.programID == 1)
+        let second = first.flatMap { GuideCursorMotion.horizontal($0, in: stations, by: 1) }
+        #expect(second?.programID == 2)
+        let third = second.flatMap { GuideCursorMotion.horizontal($0, in: stations, by: 1) }
+        // 局 B の 9:00 ではなく、入ったときの 10:45 で局 C を選ぶ
+        #expect(third?.programID == 5)
+    }
+
     @Test func initialSkipsEmptyColumns() {
         let empty = service(1, [])
         let filled = service(2, [(id: 7, start: 10 * 3_600_000, end: 11 * 3_600_000)])
