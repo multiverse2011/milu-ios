@@ -7,12 +7,6 @@ struct TVSearchView: View {
     @State private var model = SearchModel()
     /// 番組の詳細だけを持つ。再生はモデルの `openRequest` を見る
     @State private var program: GuideProgramItem?
-    @FocusState private var focus: Focus?
-
-    private enum Focus: Hashable {
-        case recording(Int64)
-        case program(Int64)
-    }
 
     /// 再生と番組の詳細は 1 つの cover で切り替える (TVRecordingsTabView と同じ決まり)
     private enum Cover: Identifiable {
@@ -196,40 +190,28 @@ struct TVSearchView: View {
 
     private func programCard(_ program: SearchProgram) -> some View {
         let text = SearchModel.programRowText(program, now: Date())
-        let isFocused = focus == .program(program.id)
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("\(text.day) \(text.time) · \(program.serviceName)")
-                .font(.system(size: 24))
-                .foregroundStyle(TVTheme.muted)
-            Text(program.name)
-                .font(DenpaFont.font(size: 30))
-                .fontWeight(.bold)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            if let state = text.state {
-                Text(state.text())
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(state == .onAir ? TVTheme.record : Color.accentColor)
+        return Button {
+            self.program = model.programItem(program)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(text.day) \(text.time) · \(program.serviceName)")
+                    .font(.system(size: 24))
+                    .foregroundStyle(TVTheme.muted)
+                Text(program.name)
+                    .font(DenpaFont.font(size: 30))
+                    .fontWeight(.bold)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if let state = text.state {
+                    Text(state.text())
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(state == .onAir ? TVTheme.record : Color.accentColor)
+                }
             }
+            .padding(22)
+            .frame(width: 520, alignment: .leading)
         }
-        .padding(22)
-        .frame(width: 520, alignment: .leading)
-        .background(
-            isFocused ? Color.white.opacity(0.14) : Color.white.opacity(0.06),
-            in: RoundedRectangle(cornerRadius: 18)
-        )
-        .overlay {
-            if isFocused {
-                RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(Color.accentColor, lineWidth: 5)
-            }
-        }
-        .scaleEffect(isFocused ? 1.04 : 1)
-        .animation(.easeOut(duration: 0.15), value: isFocused)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($focus, equals: .program(program.id))
-        .gesture(TapGesture().onEnded { self.program = model.programItem(program) })
+        .buttonStyle(.card)
     }
 
 }
