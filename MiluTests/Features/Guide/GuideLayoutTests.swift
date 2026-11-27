@@ -68,9 +68,15 @@ struct GuideLayoutTests {
     }
 
     @Test func tvCellHeadingTracksTheViewportAndStaysInsideTheCell() {
-        #expect(GuideLayout.tvCellContentInset(viewportTop: -20, cellHeight: 1600, headingHeight: 88) == 0)
-        #expect(GuideLayout.tvCellContentInset(viewportTop: 1100, cellHeight: 1600, headingHeight: 88) == 1100)
-        #expect(GuideLayout.tvCellContentInset(viewportTop: 1580, cellHeight: 1600, headingHeight: 88) == 1512)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: -20, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == 0)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1100, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == 1100)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1512, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == 1512)
+    }
+
+    @Test func tvCellHeadingIsHiddenWhenOnlyPartFits() {
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1513, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == nil)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: -680, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == nil)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 10, viewportHeight: 60, cellHeight: 1600, headingHeight: 88) == nil)
     }
 
     @Test func tvFollowKeepsTheAnchorInsideALongProgram() {

@@ -112,9 +112,15 @@ nonisolated enum GuideLayout {
         return min(max(y, lower), upper)
     }
 
-    /// 見出しをマスの見えている上端へ寄せる。マスの末尾で見出しがはみ出さないようにする。
-    static func tvCellContentInset(viewportTop: Double, cellHeight: Double, headingHeight: Double) -> Double {
-        min(max(0, viewportTop), max(0, cellHeight - headingHeight))
+    /// 見出しをマスの見えている上端へ寄せる。見出し全体が収まらないときは表示しない。
+    static func tvCellContentInset(
+        viewportTop: Double, viewportHeight: Double, cellHeight: Double, headingHeight: Double
+    ) -> Double? {
+        let top = max(0, viewportTop)
+        let bottom = min(cellHeight, viewportTop + viewportHeight)
+        // 送り先から座標を引き直したときの丸め誤差を許す。
+        guard top + headingHeight <= bottom + 0.000_001 else { return nil }
+        return top
     }
 
     /// いまの線の左に出す数字。iPhone が分だけ (「21」)、iPad が `H:mm` (「15:21」)

@@ -110,7 +110,7 @@ private struct TVGuideBoard: View {
             content(now: context.date)
         }
         .fullScreenCover(item: $opened, onDismiss: restoreFocusAfterDetail) { item in
-            TVProgramView(item: item, model: model, onClose: { opened = nil })
+            TVProgramView(item: item, model: model, onClose: closeDetail)
         }
         .onChange(of: viewport) { _, _ in
             guard !didScroll, viewport.height > 0 else { return }
@@ -340,9 +340,9 @@ private struct TVGuideBoard: View {
         let rows = rowRange(size: size)
         let nowY = nowOffset(now: now)
         let selected = resolvedCursor(now: now)
-        // 上への移動と詳細の出入りの間も、元の列の強調を保つ。
-        let highlightedColumn = focus == .aboveGrid || isShowingDetail ? lastColumn : focusColumn
-        let focused = selected?.column == highlightedColumn ? selected : nil
+        // 上の的を経由する間は強調を保つ。詳細を閉じる間は格子に焦点が戻るまで表示しない。
+        let highlightedColumn = focus == .aboveGrid ? lastColumn : focusColumn
+        let focused = !isShowingDetail && selected?.column == highlightedColumn ? selected : nil
         return ZStack(alignment: .topLeading) {
             ForEach(Array(columnRange(size: size)), id: \.self) { column in
                 ForEach(cells(in: column, rows: rows), id: \.item.id) { cell in
@@ -351,6 +351,7 @@ private struct TVGuideBoard: View {
                         item: cell.item,
                         height: max(cell.height - GuideLayout.tvColumnGap, 2),
                         viewportTop: scroll.y - top,
+                        viewportHeight: size.height,
                         textScale: textScale
                     )
                         .offset(
@@ -609,6 +610,15 @@ private struct TVGuideBoard: View {
         opened = selection.item
     }
 
+    private func closeDetail() {
+        // 格子へ戻るときは、詳細が焦点を持つ閉じアニメーションの待ちを省く。
+        var transaction = Transaction()
+        transaction.disablesAnimations = liveWatchAtOpen == app.liveWatch
+        withTransaction(transaction) {
+            opened = nil
+        }
+    }
+
     private func restoreFocusAfterDetail() {
         isShowingDetail = false
         // 「ライブで観る」でタブを移ったときは、その画面に焦点を渡す。
@@ -749,6 +759,7 @@ private struct TVGuideCell: View {
     let item: GuideProgramItem
     let height: Double
     let viewportTop: Double
+    let viewportHeight: Double
     let textScale: Double
 
     var body: some View {
@@ -781,6 +792,8 @@ private struct TVGuideCell: View {
         .frame(width: GuideLayout.tvColumnWidth, height: height, alignment: .topLeading)
         .modifier(GuideCellContentPosition(
             viewportTop: viewportTop,
+            viewportHeight: viewportHeight,
+            cellHeight: height,
             headingHeight: GuideText.tvCellHeadingHeight(titleLines: lines.title, textScale: textScale)
         ))
         .background(background, in: RoundedRectangle(cornerRadius: 6))
@@ -824,9 +837,11 @@ private struct TVGuideCell: View {
     }
 }
 
-/// 送りの途中も、毎フレームの表示位置から見出しを寄せる。
-private struct GuideCellContentPosition: GeometryEffect {
+/// 送りの途中も、毎フレームの表示位置から見出しの表示と位置を決める。
+private struct GuideCellContentPosition: ViewModifier, Animatable {
     var viewportTop: Double
+    let viewportHeight: Double
+    let cellHeight: Double
     let headingHeight: Double
 
     var animatableData: Double {
@@ -834,10 +849,14 @@ private struct GuideCellContentPosition: GeometryEffect {
         set { viewportTop = newValue }
     }
 
-    func effectValue(size: CGSize) -> ProjectionTransform {
-        let y = GuideLayout.tvCellContentInset(
-            viewportTop: viewportTop, cellHeight: size.height, headingHeight: headingHeight
+    func body(content: Content) -> some View {
+        let inset = GuideLayout.tvCellContentInset(
+            viewportTop: viewportTop, viewportHeight: viewportHeight, cellHeight: cellHeight, headingHeight: headingHeight
         )
-        return ProjectionTransform(CGAffineTransform(translationX: 0, y: y))
+        return content
+            .offset(y: inset ?? 0)
+            .opacity(inset == nil ? 0 : 1)
+            // viewportTop は補間済みなので、表示と位置はそのフレームで反映する。
+            .transaction { $0.animation = nil }
     }
 }
