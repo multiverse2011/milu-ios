@@ -5,8 +5,8 @@ import SwiftUI
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
 /// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
-/// 操作の列の高さ (controlsHeight) から字幕の持ち上げ量を決めているので、題と操作の列の字は固定の大きさのままにする。
-/// 題だけは放送の字なので .title2 に揃える (旧 44pt。行の高さの差は controlsHeight に足してある)。
+/// 字幕の持ち上げ量は操作の列の実寸 (controlsHeight) から決めるので、題と操作の列の字は
+/// テキストスタイルのまま拡大してよい。題だけは放送の字なので .title2 に揃える (旧 44pt)。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
     /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
@@ -24,6 +24,8 @@ struct TVRecordingPlayerView: View {
     @State private var controlsVisible = false
     @State private var hideTask: Task<Void, Never>?
     @State private var focusTask: Task<Void, Never>?
+    /// 操作の列の実寸。字幕を持ち上げる量を決める。実寸が届くまでの 1 フレームは 355 (題 1 行の見積り) を使う
+    @State private var controlsHeight: CGFloat = 355
     @FocusState private var surfaceFocused: Bool
     @FocusState private var control: Control?
 
@@ -171,24 +173,27 @@ struct TVRecordingPlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// 字幕を持ち上げる量。操作の列 (下から約 355pt) の上へ、字幕の面の字の下端が来るようにする
+    /// 字幕を持ち上げる量。操作の列 (下からの実寸 controlsHeight) の上へ、字幕の面の字の下端が来るようにする
     private func captionLift(height: CGFloat) -> CGFloat {
         guard height > 0, let page = session.captionPage else { return 0 }
         let span = CaptionLayout.inkSpan(page: page)
-        let top = height - Self.controlsHeight
+        let top = height - controlsHeight
         return max(0, span.bottom * height - top + 16)
     }
-
-    /// 操作の列の高さの見積り (題・シークバー・時刻・札・下の余白)。
-    /// 340 は題が旧 44pt のときの値。DenpaFont の行の高さ (1.122 × 大きさ) の差 14.6 を足す。
-    /// 題が 2 行になると差は約 29 になる (340 は 1 行の前提なので、実寸は画面で測る)
-    private static let controlsHeight: CGFloat = 355
 
     // MARK: - 操作の層
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
+            column
+        }
+        .padding(.horizontal, 96)
+    }
+
+    /// 下に並ぶ列。字幕の持ち上げ量は、題が 1 行でも 2 行でも合うこの実寸から取る
+    private var column: some View {
+        VStack(alignment: .leading, spacing: 0) {
             titleBlock
             scrubber
                 .padding(.top, 52)
@@ -197,8 +202,8 @@ struct TVRecordingPlayerView: View {
             pillRow
                 .padding(.top, 18)
         }
-        .padding(.horizontal, 96)
         .padding(.bottom, 48)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
     }
 
     private var titleBlock: some View {
