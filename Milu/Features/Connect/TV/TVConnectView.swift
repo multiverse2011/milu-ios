@@ -22,12 +22,11 @@ struct TVConnectView: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(6)
 
-                // 地・枠・拡大は tvOS の標準の TextField に任せる
+                // 地・枠・拡大は tvOS の TextField の既定の見た目に任せる
                 HStack(spacing: 24) {
                     Text("アドレス")
                         .fontWeight(.medium)
                     TextField("denpa.lan", text: $model.address)
-                        .textFieldStyle(.plain)
                         .font(.system(size: 34, weight: .semibold))
                         .onSubmit { connect() }
                 }
