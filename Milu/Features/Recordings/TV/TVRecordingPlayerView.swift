@@ -70,10 +70,9 @@ struct TVRecordingPlayerView: View {
             focusTask?.cancel()
             Task { await session.close() }
         }
-        // 札から映像の面へ戻ったら、再生中は操作の列を隠す (詳細の sheet を閉じたときも同じ)。
-        // メニューを閉じたときも焦点が面へ戻ることがあり、すぐ隠すと選んだ直後に列が消えて
-        // ボタンが効かないように見える。4 秒の自動で隠す仕組みに任せる
-        // (面に焦点がある間だけ隠れ、列へ戻れば取り消される)
+        // 札から映像の面へ戻ったら、再生中は操作の列を隠す。メニューを閉じたときも焦点が
+        // 面へ戻ることがあり、すぐ隠すと選んだ直後に列が消えてボタンが効かないように見える。
+        // ここは 4 秒の自動で隠す仕組みに任せる (詳細の sheet は onDismiss で即時に隠す)
         .onChange(of: surfaceFocused) { _, focused in
             guard focused, controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
             scheduleHide()
@@ -86,7 +85,7 @@ struct TVRecordingPlayerView: View {
                 showControls()
             }
         }
-        .sheet(isPresented: $showDetail) {
+        .sheet(isPresented: $showDetail, onDismiss: detailDismissed) {
             TVRecordingDetailView(
                 recording: session.recording,
                 resumeMs: detailResumeMs,
@@ -419,9 +418,10 @@ struct TVRecordingPlayerView: View {
             let showsBoth = showsCaptions && showsCM
             let name: LocalizedStringKey = showsBoth ? "字幕・CM" : (showsCaptions ? "字幕" : "CM 飛ばし")
             let value = showsBoth ? "\(captions)・\(cm)" : (showsCaptions ? captions : cm)
-            // 読み上げは、どちらの状態かが分かるよう項目名を添える
+            // 読み上げは、どちらの状態かが分かるよう項目名を添える。
+            // 区切りは英語でも読めるように ASCII のカンマにする
             let spoken = showsBoth
-                ? "\(String(localized: "字幕")) \(captions)、\(String(localized: "CM 飛ばし")) \(cm)"
+                ? "\(String(localized: "字幕")) \(captions), \(String(localized: "CM 飛ばし")) \(cm)"
                 : value
             Menu {
                 if showsCaptions {
@@ -639,6 +639,13 @@ struct TVRecordingPlayerView: View {
         let start = Date(timeIntervalSince1970: Double(session.recording.startAt) / 1000)
         let end = Date(timeIntervalSince1970: Double(session.recording.endAt) / 1000)
         return Wording.timeRange(from: start, to: end, separator: .recording)
+    }
+
+    /// 詳細 (sheet) を閉じたとき。再生中で列が出ていれば、以前と同じくすぐ隠す。
+    /// メニューの閉じ際は sheet ではないので、こちらとは区別できる
+    private func detailDismissed() {
+        guard controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
+        hideControls()
     }
 
     /// 長押しで詳細を開く。続きから再生の位置は開いた瞬間の値で止める
