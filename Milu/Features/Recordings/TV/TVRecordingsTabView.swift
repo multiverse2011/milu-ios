@@ -46,7 +46,8 @@ struct TVRecordingsTabView: View {
                     recording: recording,
                     onPlay: { from in open(recording, from: from) },
                     onDelete: {
-                        // 消せたかは delete の結果で決まる。失敗したら元のカードへ戻す
+                        // 消える録画へフォーカスを戻さない。先に手放し、消せなかったら delete で戻す
+                        forget(recording.id)
                         self.cover = nil
                         Task { await delete(recording) }
                     },
@@ -253,14 +254,15 @@ struct TVRecordingsTabView: View {
     }
 
     /// 長押しメニューから詳細を開くと、閉じたときに焦点が既定の先頭へ落ちる。最後にフォーカスした
-    /// カードへ戻す。消えた録画なら何もしない (先頭に任せる)
+    /// カードへ戻す。消えた録画なら何もしない (先頭に任せる)。閉じた直後はフォーカスエンジンが
+    /// 先頭へ戻すので 1 拍遅らせる (TVLiveTabView・TVLivePlayerView と同じ)
     private func restoreFocus() {
         guard let id = lastFocused else { return }
         guard model.visible.contains(where: { $0.id == id }) else {
             lastFocused = nil
             return
         }
-        focused = id
+        Task { focused = id }
     }
 
     /// 消えた録画へは戻らない。焦点も外す (先頭は tvOS の既定に任せる)
@@ -301,6 +303,8 @@ struct TVRecordingsTabView: View {
     private func delete(_ recording: Recording) async {
         if let message = await model.delete(recording) {
             alertMessage = message
+            // 消せなかったので元のカードへ戻す (閉じた直後の既定のフォーカスに上書きされないよう遅らせる)
+            Task { focused = recording.id }
             return
         }
         forget(recording.id)
