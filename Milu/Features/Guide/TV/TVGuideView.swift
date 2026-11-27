@@ -91,6 +91,10 @@ private struct TVGuideBoard: View {
     @State private var animationToken = 0
     /// 動きの連鎖が続いているか。範囲を畳むのは連鎖が終わったときだけ
     @State private var isAnimating = false
+    /// 最後に上下でカーソルを動かした時刻。焦点の仕組みが同じ押下で焦点を動かしたとき、
+    /// 移動の当人 (move) が動かしたかを言い分けるのに使う
+    /// shortcut: 同じ押下かを 0.15 秒で見分ける、焦点と move の順序が分かる API が出たら差し替える
+    @State private var lastVerticalMove = Date.distantPast
     @State private var viewport = CGSize.zero
     @State private var didScroll = false
 
@@ -136,6 +140,21 @@ private struct TVGuideBoard: View {
         // 焦点が列に移ったら、基準の時刻でその列の番組を選ぶ。左右の移動はこれだけで決める
         .onChange(of: focus) { old, new in
             guard case .column(let column) = new else {
+                // 列からチップへ焦点が抜けた。上を押すと焦点の仕組みが格子の外 (チップ) へ
+                // 焦点を移し、move が呼ばれないことがある (カーソルが上へ動かない)。
+                // ここでカーソルを上へ動かして格子へ戻す。一番上の番組からは動かせないので、
+                // そのままチップへ渡す
+                if case .some(.column(let previous)) = old, case .some = new,
+                   GuideCursorMotion.isUsable(previous, in: guide.services),
+                   let current = resolvedCursor(now: Date()),
+                   let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
+                    // 同じ押下で move が動かしていれば、二重に動かさない
+                    if Date().timeIntervalSince(lastVerticalMove) > 0.15 {
+                        animate(to: up, in: guide.services)
+                    }
+                    focus = .column(up.column)
+                    return
+                }
                 // チップ (自分で格子の外へ出た) なら最後の列はもう要らない。
                 // サイドバー・詳細 (nil) は、的が消えて落ちた場合に備えて残す
                 if case .some = new { lastColumn = nil }
@@ -515,6 +534,7 @@ private struct TVGuideBoard: View {
               focus == .column(current.column)
         else { return }
         if let next = GuideCursorMotion.vertical(current, in: guide.services, by: direction == .up ? -1 : 1) {
+            lastVerticalMove = Date()
             animate(to: next, in: guide.services)
         } else if direction == .up {
             // 一番上の番組からは、上の段 (日付) へ抜ける

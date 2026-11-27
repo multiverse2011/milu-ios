@@ -47,6 +47,27 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.initial(in: [], now: 0) == nil)
     }
 
+    @Test func cursorCanSitOnTheProgramOnAir() {
+        // 21:58、局 A は 20:00–22:00 が放送中、その下が 22:00–23:00。局 B は 21:00–23:00 が放送中
+        let hour: Int64 = 3_600_000
+        let now = 21 * hour + 58 * 60_000
+        let list = [
+            service(1, [(id: 1, start: 20 * hour, end: 22 * hour),
+                        (id: 2, start: 22 * hour, end: 23 * hour)]),
+            service(2, [(id: 3, start: 19 * hour, end: 21 * hour),
+                        (id: 4, start: 21 * hour, end: 23 * hour)]),
+        ]
+        // 開いた直後は放送中の番組に乗っている
+        let opened = GuideCursorMotion.initial(in: list, now: now)
+        #expect(opened == GuideCursor(column: 0, programID: 1, anchor: now))
+        // 下の番組から ↑ で放送中の番組へ
+        let below = GuideCursor(column: 0, programID: 2, anchor: 22 * hour)
+        #expect(GuideCursorMotion.vertical(below, in: list, by: -1) == GuideCursor(column: 0, programID: 1, anchor: 20 * hour))
+        // 横から入っても、その局の放送中の番組へ (基準の時刻は 21:58 のまま)
+        #expect(GuideCursorMotion.horizontal(opened!, in: list, by: 1) == GuideCursor(column: 1, programID: 4, anchor: now))
+        #expect(GuideCursorMotion.horizontal(opened!, in: list, by: -1) == nil)
+    }
+
     @Test func verticalMovesWithinTheColumn() {
         let cursor = GuideCursor(column: 0, programID: 2, anchor: 10 * 3_600_000 + 1_800_000)
         // 基準の時刻は移った番組の開始
