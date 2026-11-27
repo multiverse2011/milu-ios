@@ -149,6 +149,7 @@ struct TVSearchView: View {
             .padding(.trailing, 40)
             // 上の余白は小さくする。結果の先頭へフォーカスが移ると tvOS が結果を上へ送り、
             // 検索欄が左上の「検索」の札に潜り込む (カードの題名を絵の下へ移して縦に伸びたため)
+            // shortcut: 余白はカードの高さで測った値、カードの高さか上の構成を変えたら測り直す
             .padding(.top, 8)
             .padding(.bottom, 60)
         }
