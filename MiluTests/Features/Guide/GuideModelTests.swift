@@ -374,6 +374,27 @@ import Testing
         #expect(!model.tvDidFail)
     }
 
+    @Test func tvReloadPrependsAnEarlierDayWithoutMovingTheOrigin() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let center = dayOffset(3, from: base)
+        let previous = dayOffset(-1, from: center)
+        let next = dayOffset(1, from: center)
+        let failures = Box<Set<Int64>>([GuideLayout.broadcastRange(for: previous).from])
+        let (model, _, _) = fixture(tvTransport(fails: { failures.value.contains($0) }), now: now)
+        await model.tvStart(now: now)
+        let origin = model.tvFrom
+
+        await model.tvReload(center: center, now: now)
+        #expect(model.tvDays == [center, next])
+
+        failures.value = []
+        await model.tvReload(center: center, now: now)
+        #expect(model.tvDays == [previous, center, next])
+        #expect(model.tvFrom == origin)
+        #expect(model.tvBase == base)
+    }
+
     @Test func tvWindowStopsAtUntilDay() async throws {
         let now = fixedNow()
         let day = GuideLayout.broadcastDay(for: now)

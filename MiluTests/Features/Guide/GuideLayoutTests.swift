@@ -233,6 +233,34 @@ struct GuideLayoutTests {
         #expect(GuideLayout.tvWindowDays(center: date(15, 0), first: date(15, 0), last: last) == [date(15, 0), date(16, 0)])
     }
 
+    @Test func tvTopEdgeWaitsOnlyIfThereIsAnEarlierDay() {
+        let base = date(14, 0)
+        #expect(GuideLayout.tvHasPreviousDay(firstLoaded: date(15, 0), base: base))
+        #expect(!GuideLayout.tvHasPreviousDay(firstLoaded: base, base: base))
+        #expect(!GuideLayout.tvHasPreviousDay(firstLoaded: nil, base: base))
+    }
+
+    @Test func tvPrependingADayExtendsTheScrollRangeWithoutMovingTheExistingPositions() {
+        let origin = ms(14, 4)
+        let end = ms(18, 4)
+        let before = GuideLayout.tvScrollRange(origin: origin, loadedStart: ms(16, 4), loadedEnd: end, viewportHeight: 700)
+        let after = GuideLayout.tvScrollRange(origin: origin, loadedStart: ms(15, 4), loadedEnd: end, viewportHeight: 700)
+        let dayHeight = 1_440 * GuideLayout.tvPointsPerMinute
+        #expect(before.lowerBound == 2 * dayHeight)
+        #expect(after.lowerBound == dayHeight)
+        #expect(after.upperBound == before.upperBound)
+
+        let scrollLow = before.lowerBound
+        let scrollHigh = scrollLow + 200
+        let ringTop = GuideLayout.offset(of: ms(16, 4, 30), from: origin, pointsPerMinute: GuideLayout.tvPointsPerMinute)
+        for range in [before, after] {
+            #expect(range.contains(scrollLow))
+            #expect(range.contains(scrollHigh))
+            let interpolatedScrollY = min(max(range.lowerBound, scrollLow + 60), range.upperBound)
+            #expect(ringTop - interpolatedScrollY == 30 * GuideLayout.tvPointsPerMinute - 60)
+        }
+    }
+
     @Test func dayHeading() {
         #expect(GuideLayout.dayHeading(for: date(29, 0), calendar: calendar) == "11/29")
         let december = calendar.date(from: DateComponents(year: 2026, month: 12, day: 1))!

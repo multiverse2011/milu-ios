@@ -138,6 +138,15 @@ nonisolated enum GuideLayout {
         max(0, nowOffset - viewportHeight / 4)
     }
 
+    /// 座標の起点を保ったまま、読み込んだ範囲に送り先を収める。
+    static func tvScrollRange(
+        origin: Double, loadedStart: Double, loadedEnd: Double, viewportHeight: Double
+    ) -> ClosedRange<Double> {
+        let top = offset(of: loadedStart, from: origin, pointsPerMinute: tvPointsPerMinute)
+        let bottom = offset(of: loadedEnd, from: origin, pointsPerMinute: tvPointsPerMinute)
+        return top...max(top, bottom - viewportHeight)
+    }
+
     /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
     /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、時刻を優先する。
     static func tvFollowOffset(
@@ -207,6 +216,12 @@ nonisolated enum GuideLayout {
             next = after
         }
         return days
+    }
+
+    /// 窓の先頭からさらに前の放送日を読めるなら、上端でも焦点を格子に戻す。
+    static func tvHasPreviousDay(firstLoaded: Date?, base: Date?) -> Bool {
+        guard let firstLoaded, let base else { return false }
+        return firstLoaded > base
     }
 
     /// 時刻の列に出す日の見出し。時刻の列 (70pt) に収めるため月/日だけの「11/29」
