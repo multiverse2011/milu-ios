@@ -17,7 +17,6 @@ struct TVGuideView: View {
                 Color.clear
             }
         }
-        .background(TVTheme.background)
         .task {
             await model.reload()
         }
@@ -39,13 +38,13 @@ struct TVGuideView: View {
         VStack(spacing: 12) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 64, weight: .light))
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Text("denpa に接続できません")
                 .font(.title2.bold())
                 .padding(.top, 10)
             Text("\(app.server?.displayName ?? "") から応答がありません。\nWi-Fi などの接続状況を確認してください。")
                 .font(.callout)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
             Button("再試行") {
@@ -167,7 +166,7 @@ private struct TVGuideBoard: View {
     }
 
     /// 種別・日付のチップ (TV-Guide)。外観・拡大・フォーカス時の字の色は tvOS の標準に任せる。
-    /// 選んでいるものだけ tint で塗り、フォーカスと区別できるようにする
+    /// 選んでいるものは ✓ で示し、フォーカスと区別できるようにする
     private func chip(
         _ label: String,
         active: Bool,
@@ -175,14 +174,12 @@ private struct TVGuideBoard: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(label)
+            Text(active ? "✓ \(label)" : label)
                 .font(.callout.weight(active ? .bold : .medium))
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.capsule)
         .controlSize(.large)
-        // 未選択は tint を外す。.secondary を渡すとフォーカス時に選択中と同じ灰の面に白字になる
-        .tint(active ? Color.accentColor : nil)
         .focused($focus, equals: value)
         .accessibilityAddTraits(active ? .isSelected : [])
     }
@@ -200,7 +197,7 @@ private struct TVGuideBoard: View {
                         if let key = service.remoteControlKey {
                             Text("\(key)")
                                 .font(.caption)
-                                .foregroundStyle(TVTheme.muted)
+                                .foregroundStyle(.secondary)
                         }
                         Text(service.name)
                             .font(DenpaFont.font(.callout))
@@ -287,7 +284,7 @@ private struct TVGuideBoard: View {
                 let time = from + Double(hour) * 3_600_000
                 Text("\(GuideLayout.calendar.component(.hour, from: Date(timeIntervalSince1970: time / 1000)))")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
                     .offset(y: GuideLayout.offset(of: time, from: from, pointsPerMinute: GuideLayout.tvPointsPerMinute) + 6)
             }
             if let nowY = nowOffset(now: now) {
@@ -301,7 +298,7 @@ private struct TVGuideBoard: View {
             }
         }
         .frame(width: GuideLayout.tvTimeWidth, height: totalHeight, alignment: .topLeading)
-        .background(TVTheme.background)
+        .background(.background)
         .clipped()
     }
 
@@ -472,7 +469,7 @@ private struct TVGuideCell: View {
             if lines.description > 0, let description = item.description, !description.isEmpty {
                 Text(description)
                     .font(DenpaFont.font(.footnote))
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
                     .lineLimit(lines.description)
                     .truncationMode(.tail)
             }
@@ -510,7 +507,7 @@ private struct TVGuideCell: View {
     }
 
     private var genreColor: Color {
-        guard let rgba = GenreColor.color(item.genre) else { return TVTheme.muted }
+        guard let rgba = GenreColor.color(item.genre) else { return .secondary }
         return Color(.sRGB, red: Double(rgba.r) / 255, green: Double(rgba.g) / 255, blue: Double(rgba.b) / 255)
     }
 

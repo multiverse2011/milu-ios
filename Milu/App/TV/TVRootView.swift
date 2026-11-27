@@ -39,6 +39,5 @@ struct TVRootView: View {
                     .id(model.server?.url)
             }
         }
-        .background(TVTheme.background)
     }
 }

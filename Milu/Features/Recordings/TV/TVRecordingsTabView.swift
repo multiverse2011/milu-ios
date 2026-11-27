@@ -30,10 +30,7 @@ struct TVRecordingsTabView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            background
-            content
-        }
+        content
         .task { await model.start(app) }
         .onDisappear { model.stop() }
         .onChange(of: focused) { _, id in
@@ -52,7 +49,7 @@ struct TVRecordingsTabView: View {
                     },
                     onClose: { self.cover = nil }
                 )
-                .background(TVTheme.background)
+                .background(.background)
             case .watch(let request):
                 TVRecordingPlayerView(
                     session: request.session,
@@ -126,7 +123,7 @@ struct TVRecordingsTabView: View {
                 // 字の間は画面案の全角の空き。文言そのものには入れない (訳す鍵を汚さない)
                 HStack(spacing: 14) {
                     Text("録画")
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(.secondary)
                         .fontWeight(.semibold)
                     Text("長押しでメニューから詳細")
                     HStack(spacing: 8) {
@@ -138,7 +135,7 @@ struct TVRecordingsTabView: View {
                     .padding(.leading, 8)
                 }
                 .font(.callout)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
 
                 HStack(spacing: 16) {
                     unseenDot(recording, size: 24)
@@ -149,14 +146,14 @@ struct TVRecordingsTabView: View {
                 }
                 Text(metaLine(recording))
                     .font(.title3)
-                    .foregroundStyle(Color(white: 0.92).opacity(0.86))
+                    .foregroundStyle(.secondary)
                 if recording.recording {
                     Text("● 録画中")
                         .font(.callout.bold())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
-                        .background(.red, in: RoundedRectangle(cornerRadius: 8))
+                        .background(TVTheme.record, in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding(.bottom, 6)
@@ -167,13 +164,13 @@ struct TVRecordingsTabView: View {
         VStack(spacing: 16) {
             Image(systemName: "play.rectangle")
                 .font(.system(size: 110, weight: .light))
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Text("録画はまだありません")
                 .font(.title.bold())
                 .padding(.top, 10)
             Text("番組表で番組を予約すると、録れたものがここに並びます。")
                 .font(.title3)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Button("ライブへ", action: onGoLive)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -187,10 +184,10 @@ struct TVRecordingsTabView: View {
         return HStack(spacing: 6) {
             Text(heading.primary)
             Text(heading.secondary)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
         }
         .font(.body)
-        .foregroundStyle(Color(white: 0.92).opacity(0.86))
+        .foregroundStyle(.secondary)
     }
 
     // MARK: - カード
@@ -269,21 +266,6 @@ struct TVRecordingsTabView: View {
         if focused == id { focused = nil }
     }
 
-    /// 絵の右上の暖かい光
-    private var background: some View {
-        ZStack {
-            TVTheme.background
-            RadialGradient(
-                colors: [Color(red: 0.91, green: 0.71, blue: 0.56).opacity(0.45), .clear],
-                center: .topTrailing,
-                startRadius: 60,
-                endRadius: 900
-            )
-            .blur(radius: 40)
-        }
-        .ignoresSafeArea()
-    }
-
     private func open(_ recording: Recording, from: Double?) {
         guard let server = app.server else { return }
         let session = RecordingSession(
@@ -336,7 +318,7 @@ struct TVRecordingCard: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
-                        .background(.red, in: RoundedRectangle(cornerRadius: 8))
+                        .background(TVTheme.record, in: RoundedRectangle(cornerRadius: 8))
                         .padding(14)
                 }
             }
@@ -359,7 +341,7 @@ struct TVRecordingCard: View {
             }
             Text(meta)
                 .font(.callout)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
         }
         .frame(width: 510, alignment: .leading)
         .opacity(playable ? 1 : 0.45)
@@ -389,11 +371,7 @@ struct TVPosterImage: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                LinearGradient(
-                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.05)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                Rectangle().fill(.quaternary)
             }
         }
         .frame(width: width, height: height)
@@ -435,13 +413,13 @@ struct TVOfflineView: View {
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 96, weight: .light))
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Text("denpa に接続できません")
                 .font(.title2.bold())
                 .padding(.top, 8)
             Text("Wi-Fi などの接続状況を確認してください。")
                 .font(.body)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Button("再試行", action: retry)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)

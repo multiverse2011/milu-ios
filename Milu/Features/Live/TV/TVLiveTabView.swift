@@ -26,12 +26,10 @@ struct TVLiveTabView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
             switch model.load {
             case .loading:
                 ProgressView()
                     .controlSize(.large)
-                    .tint(.white)
             case .offline:
                 OfflineView(host: app.server?.displayName ?? "") {
                     Task { await model.reload() }
@@ -39,7 +37,7 @@ struct TVLiveTabView: View {
             case .empty:
                 Text("視聴できる放送局がありません")
                     .font(.title3)
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
             case .ready:
                 TVLiveMenuView(
                     model: model,

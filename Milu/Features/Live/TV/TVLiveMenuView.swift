@@ -76,7 +76,7 @@ struct TVLiveMenuView: View {
         return HStack(spacing: 18) {
             Text("画質")
                 .font(.callout)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             ForEach(Array((session?.qualityItems ?? []).enumerated()), id: \.offset) { index, item in
                 chip(
                     TVLiveText.qualityItemTitle(item, session: session),
@@ -89,7 +89,7 @@ struct TVLiveMenuView: View {
             if session?.rungItems.isEmpty == false {
                 Text("解像度")
                     .font(.callout)
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
             }
             ForEach(session?.rungItems ?? [], id: \.rung) { item in
                 chip(
@@ -149,7 +149,7 @@ struct TVLiveMenuView: View {
         let marked = selected && !recording ? "✓ \(title)" : title
         return Button(marked, action: action)
             .buttonStyle(.bordered)
-            .tint(recording ? TVTheme.record : Color.accentColor)
+            .tint(recording ? TVTheme.record : nil)
             .focused($focus, equals: value)
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -160,7 +160,7 @@ struct TVLiveMenuView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(type.title)
                 .font(.headline)
-                .foregroundStyle(TVTheme.body)
+                .foregroundStyle(.primary)
                 .padding(.top, 24)
                 .padding(.leading, 4)
             ScrollView(.horizontal) {
@@ -189,7 +189,7 @@ struct TVLiveMenuView: View {
                     if let key = service.remoteControlKey {
                         Text("\(key)")
                             .font(.callout)
-                            .foregroundStyle(TVTheme.muted)
+                            .foregroundStyle(.secondary)
                             .frame(width: 18, alignment: .leading)
                     }
                     TVServiceLogo(service: service, baseURL: baseURL, token: token)
@@ -199,10 +199,7 @@ struct TVLiveMenuView: View {
                         if model.isPlaybackOpen {
                             Text("視聴中")
                                 .font(.caption.bold())
-                                .foregroundStyle(TVTheme.ink)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 2)
-                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                                .foregroundStyle(Color.accentColor)
                         } else {
                             // 枠の代わりの印。再生していない間は「いま選んである局」だけを示す
                             Image(systemName: "play.tv.fill")
@@ -218,7 +215,7 @@ struct TVLiveMenuView: View {
                     .lineLimit(1)
                 Text(service.now?.title ?? "")
                     .font(DenpaFont.font(.callout))
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             .padding(.horizontal, 24)

@@ -57,7 +57,7 @@ struct TVProgramView: View {
                         text: description, font: DenpaFont.font(.body),
                         lineSpacing: 12, scalesWithTextSize: true
                     )
-                        .foregroundStyle(TVTheme.body)
+                        .foregroundStyle(.primary)
                         .padding(.top, 36)
                         .frame(maxWidth: 1340, alignment: .leading)
                 }
@@ -71,7 +71,7 @@ struct TVProgramView: View {
             .padding(.bottom, Self.bottomPadding)
         }
         .tvContinueHint(bottomPadding: Self.bottomPadding)
-        .background(TVTheme.background)
+        .background(.background)
         .task {
             detail = await model.detail(item)
         }
@@ -105,7 +105,7 @@ struct TVProgramView: View {
             ChannelLogoView(path: item.logo, serviceName: item.serviceName, width: 70, height: 40)
             Text(headerText)
                 .font(.body)
-                .foregroundStyle(TVTheme.body)
+                .foregroundStyle(.primary)
         }
     }
 
@@ -154,9 +154,9 @@ struct TVProgramView: View {
     private var progressBar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.22))
+                Capsule().fill(.quaternary)
                 Capsule()
-                    .fill(Color.accentColor)
+                    .fill(.primary)
                     .frame(width: geo.size.width * progress)
             }
         }
@@ -226,12 +226,12 @@ struct TVProgramView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(GuideText.extendedHeading(entry.heading))
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                 TVReadingText(
                     text: entry.body, font: DenpaFont.font(.body),
                     lineSpacing: 12, scalesWithTextSize: true
                 )
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
             }
             .frame(maxWidth: 1340, alignment: .leading)
             .padding(.top, 20)
@@ -267,7 +267,7 @@ struct TVProgramView: View {
             case .conflict(let reason):
                 return reason.isEmpty ? nil : (reason, .orange)
             case .reason(let text):
-                return text.isEmpty ? nil : (text, TVTheme.muted)
+                return text.isEmpty ? nil : (text, Color.secondary)
             case .onAir, .reserved:
                 continue
             }
@@ -290,7 +290,7 @@ struct TVProgramView: View {
     }
 
     private var genreColor: Color {
-        guard let rgba = GenreColor.color(item.genre) else { return TVTheme.muted }
+        guard let rgba = GenreColor.color(item.genre) else { return .secondary }
         return Color(.sRGB, red: Double(rgba.r) / 255, green: Double(rgba.g) / 255, blue: Double(rgba.b) / 255)
     }
 
@@ -347,8 +347,8 @@ struct TVProgramView: View {
 
 /// 詳細の札 (状態・ジャンル)。画面案の丸い角 8 の面
 private struct TVPill<Content: View>: View {
-    var background: Color = .white.opacity(0.1)
-    var foreground: Color = .white
+    var background: Color?
+    var foreground: Color = .primary
     var bold = false
     @ViewBuilder var content: Content
 
@@ -358,6 +358,6 @@ private struct TVPill<Content: View>: View {
             .foregroundStyle(foreground)
             .padding(.horizontal, 14)
             .frame(height: 44)
-            .background(background, in: RoundedRectangle(cornerRadius: 8))
+            .background(background.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.quaternary), in: RoundedRectangle(cornerRadius: 8))
     }
 }

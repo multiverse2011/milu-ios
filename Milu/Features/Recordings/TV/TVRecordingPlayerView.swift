@@ -96,7 +96,7 @@ struct TVRecordingPlayerView: View {
                 },
                 onClose: { showDetail = false }
             )
-            .background(TVTheme.background)
+            .background(.background)
         }
         .alert(session.recording.title, isPresented: $confirmDelete) {
             Button("削除", role: .destructive) {
@@ -207,7 +207,7 @@ struct TVRecordingPlayerView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 4)
-                        .background(.red, in: RoundedRectangle(cornerRadius: 8))
+                        .background(TVTheme.record, in: RoundedRectangle(cornerRadius: 8))
                 }
                 Text("\(session.recording.serviceName) · \(dateRange)")
                     .font(.system(size: 26))
@@ -254,9 +254,6 @@ struct TVRecordingPlayerView: View {
                 Circle()
                     .fill(.white)
                     .frame(width: 30, height: 30)
-                    .overlay {
-                        Circle().strokeBorder(Color.accentColor, lineWidth: 5)
-                    }
                     .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
                     .offset(x: width * fraction - 15)
             }
@@ -475,7 +472,7 @@ struct TVRecordingPlayerView: View {
             if !message(of: stop).isEmpty {
                 Text(message(of: stop))
                     .font(.system(size: 28))
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             HStack(spacing: 20) {

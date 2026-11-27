@@ -34,7 +34,7 @@ struct TVLiveDetailView: View {
             // 画面案の下端の案内
             Text("▼ 下キーで続き")
                 .font(.callout)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
                 .padding(.bottom, 50)
         }
         .defaultFocus($focus, .detailRecord, priority: .userInitiated)
@@ -46,7 +46,7 @@ struct TVLiveDetailView: View {
                 TVServiceLogo(service: service, baseURL: baseURL, token: token)
                 Text(headerText)
                     .font(.body)
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
             }
             Text(service.now?.title ?? "")
                 .font(DenpaFont.font(.title))
@@ -58,7 +58,7 @@ struct TVLiveDetailView: View {
                     .frame(width: 520)
                 Text(TVLiveText.remaining(service.now, now: now))
                     .font(.callout)
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
             }
             .padding(.top, 22)
             chips.padding(.top, 20)
@@ -67,19 +67,19 @@ struct TVLiveDetailView: View {
                 Text(description)
                     .font(DenpaFont.font(.body))
                     .lineSpacing(12)
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: 1340, alignment: .leading)
                     .padding(.top, 44)
             }
             ForEach(Array(extendedItems.enumerated()), id: \.offset) { _, item in
                 Text(GuideText.extendedHeading(item.heading))
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .padding(.top, 28)
                 Text(item.body)
                     .font(DenpaFont.font(.body))
                     .lineSpacing(12)
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: 1340, alignment: .leading)
                     .padding(.top, 6)
             }
@@ -102,7 +102,7 @@ struct TVLiveDetailView: View {
                     .font(.callout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -131,7 +131,7 @@ struct TVLiveDetailView: View {
                 onToggleRecord()
             }
                 .buttonStyle(.bordered)
-                .tint(recording ? TVTheme.record : Color.accentColor)
+                .tint(recording ? TVTheme.record : nil)
                 .focused($focus, equals: .detailRecord)
             Button("閉じる") { onClose() }
                 .buttonStyle(.bordered)

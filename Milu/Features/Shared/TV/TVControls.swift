@@ -8,8 +8,8 @@ struct TVChannelLogo: View {
         Text(String(name.prefix(1)))
             // ロゴの枠 (70×40) に合わせて決まる字なので、枠の大きさに合わせる
             .font(.system(size: 20, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
             .frame(width: 70, height: 40)
-            .background(Color.accentColor.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }

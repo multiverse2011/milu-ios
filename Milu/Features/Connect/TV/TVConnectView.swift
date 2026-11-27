@@ -18,7 +18,7 @@ struct TVConnectView: View {
                     .padding(.top, 4)
                 Text("家の denpa の Web 画面を開くときのアドレスを入れてください。\niPhone のキーボードからも打てます。")
                     .font(.title3)
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(6)
 
@@ -40,7 +40,7 @@ struct TVConnectView: View {
                             .foregroundStyle(.orange)
                     } else {
                         Text("例: denpa.lan、192.168.1.20:3000")
-                            .foregroundStyle(TVTheme.muted)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .font(.callout)
@@ -69,7 +69,7 @@ struct TVConnectView: View {
 
             Text("Milu は denpa の非公式クライアントです。")
                 .font(.callout)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
                 .padding(.bottom, 60)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

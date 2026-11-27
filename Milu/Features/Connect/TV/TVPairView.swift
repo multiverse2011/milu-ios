@@ -20,12 +20,12 @@ struct TVPairView: View {
                         .font(.largeTitle.bold())
                     Text("\(host) はログインが要ります。\nスマホで QR を読み取り、denpa にログインして、\n出てきた画面でコードが同じことを確かめて許可してください。")
                         .font(.title3)
-                        .foregroundStyle(TVTheme.body)
+                        .foregroundStyle(.primary)
                         .lineSpacing(6)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("コード")
                             .font(.callout)
-                            .foregroundStyle(TVTheme.muted)
+                            .foregroundStyle(.secondary)
                         Text(pairing.code?.userCode ?? "---- ----")
                             .font(.system(.largeTitle, design: .monospaced).bold())
                             .tracking(8)
@@ -37,7 +37,7 @@ struct TVPairView: View {
                                 .scaleEffect(1.4)
                         }
                         Text(pairing.error ?? String(localized: "許可を待っています"))
-                            .foregroundStyle(pairing.error == nil ? TVTheme.muted : .orange)
+                            .foregroundStyle(pairing.error == nil ? Color.secondary : .orange)
                     }
                     .font(.body)
                 }

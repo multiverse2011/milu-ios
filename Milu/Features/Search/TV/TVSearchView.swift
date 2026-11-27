@@ -23,12 +23,8 @@ struct TVSearchView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
-                TVTheme.background
-                    .ignoresSafeArea()
-                content
-            }
-            .searchable(text: query, prompt: Text("番組・録画を検索"))
+            content
+                .searchable(text: query, prompt: Text("番組・録画を検索"))
         }
         .task { await model.start(app) }
         .onDisappear { model.stop() }
@@ -50,7 +46,7 @@ struct TVSearchView: View {
                 }
             case .program(let item):
                 TVProgramView(item: item, model: model, onClose: { program = nil })
-                    .background(TVTheme.background)
+                    .background(.background)
             }
         }
     }
@@ -95,7 +91,6 @@ struct TVSearchView: View {
         } else {
             ProgressView()
                 .controlSize(.large)
-                .tint(.white)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -158,7 +153,7 @@ struct TVSearchView: View {
     private func heading(_ title: LocalizedStringKey) -> some View {
         Text(title)
             .font(.body)
-            .foregroundStyle(Color(white: 0.92).opacity(0.86))
+            .foregroundStyle(.secondary)
     }
 
     private func moreNote(_ more: Bool) -> some View {
@@ -166,7 +161,7 @@ struct TVSearchView: View {
             if more {
                 Text("ほかにもあります。言葉を足すと絞り込めます。")
                     .font(.callout)
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -199,7 +194,7 @@ struct TVSearchView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(text.day) \(text.time) · \(program.serviceName)")
                     .font(.callout)
-                    .foregroundStyle(TVTheme.muted)
+                    .foregroundStyle(.secondary)
                 Text(program.name)
                     .font(DenpaFont.font(.body))
                     .fontWeight(.bold)

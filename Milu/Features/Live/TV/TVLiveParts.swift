@@ -40,7 +40,7 @@ struct TVServiceLogo: View {
                     // ロゴの枠 (70×40) に合わせて決まる字なので、枠の高さから出す
                     .font(.system(size: height * 0.5, weight: .bold))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white.opacity(0.14))
+                    .background(.quaternary)
             }
         }
         .frame(width: width, height: height)
@@ -87,25 +87,25 @@ struct TVServiceHeader: View {
                         if let key = service.remoteControlKey {
                             Text("\(key)")
                                 .font(.body.weight(.medium))
-                                .foregroundStyle(TVTheme.muted)
+                                .foregroundStyle(.secondary)
                         }
                         Text(service.name)
                             .font(.headline)
                         if let quality {
                             Text(quality)
                                 .font(.body)
-                                .foregroundStyle(TVTheme.muted)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     HStack(spacing: 14) {
                         Text(service.now?.title ?? "")
                             .font(DenpaFont.font(.body))
                             .fontWeight(.bold)
-                            .foregroundStyle(TVTheme.body)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Text(TVLiveText.remaining(service.now, now: context.date))
                             .font(.body)
-                            .foregroundStyle(TVTheme.muted)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -124,7 +124,7 @@ struct TVProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.22))
                 Capsule()
-                    .fill(Color.accentColor)
+                    .fill(.white)
                     .frame(width: proxy.size.width * min(max(value, 0), 1))
             }
         }

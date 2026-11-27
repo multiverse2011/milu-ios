@@ -168,10 +168,10 @@ private struct TVContinueHint: ViewModifier {
                 if hasMore {
                     Text("▼ 下キーで続き")
                         .font(.callout)
-                        .foregroundStyle(TVTheme.muted)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(TVTheme.background)
+                        .background(.background)
                 }
             }
     }
