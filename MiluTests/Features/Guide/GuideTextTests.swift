@@ -1,5 +1,6 @@
 import Foundation
 #if os(tvOS)
+import SwiftUI
 import UIKit
 #endif
 import Testing
@@ -112,8 +113,9 @@ import Testing
         // 1 行も入らないマスは何も出さない
         #expect(GuideText.tvCellLines(height: 20).title == 0)
 
-        // どの高さでも、出る行が実フォントの行の高さでマスの内側に収まる (境目の 122pt 前後も含む)
-        for height in stride(from: 1.0, through: 600.0, by: 0.5) {
+        // 列の間隔 4pt を引いて実際にマスへ渡す高さも検証する。
+        let cellHeights = [30, 60].map { $0 * GuideLayout.tvPointsPerMinute - GuideLayout.tvColumnGap }
+        for height in cellHeights + Array(stride(from: 1.0, through: 600.0, by: 0.5)) {
             let lines = GuideText.tvCellLines(height: height)
             if lines.title > 0 {
                 #expect(realHeight(lines) <= height - 20)
@@ -123,14 +125,13 @@ import Testing
 
     /// 文字の大きさの設定を上げても、見積りは実フォントの行の高さに追従してはみ出さない
     @Test func tvCellLinesFollowTheTextSize() {
-        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityLarge)
-        var lines = (title: 0, description: 0)
-        traits.performAsCurrent {
-            lines = GuideText.tvCellLines(height: 276)
-        }
-        // 字が大きくなるぶん、入る行は減る
-        #expect(lines.description < 6)
-        #expect(realHeight(lines, traits: traits) <= 276 - 20)
+        let height = 60 * GuideLayout.tvPointsPerMinute - GuideLayout.tvColumnGap
+        let standard = GuideText.tvCellLines(height: height, dynamicTypeSize: .large)
+        let enlarged = GuideText.tvCellLines(height: height, dynamicTypeSize: .accessibility1)
+        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityMedium)
+        #expect(enlarged.title > 0)
+        #expect(enlarged.title + enlarged.description < standard.title + standard.description)
+        #expect(realHeight(enlarged, traits: traits) <= height - 20)
     }
 
     /// 実フォント (Denpa Font) の行の高さで並べたときの高さ。実装の見積りとは別に UIFont から測る

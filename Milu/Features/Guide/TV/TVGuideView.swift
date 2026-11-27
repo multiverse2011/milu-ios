@@ -455,9 +455,10 @@ private struct TVGuideCell: View {
     let item: GuideProgramItem
     let height: Double
     let focused: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let lines = GuideText.tvCellLines(height: height)
+        let lines = GuideText.tvCellLines(height: height, dynamicTypeSize: dynamicTypeSize)
         VStack(alignment: .leading, spacing: 4) {
             if lines.title > 0 {
                 HStack(alignment: .top, spacing: 8) {
@@ -487,7 +488,6 @@ private struct TVGuideCell: View {
                     .lineLimit(lines.description)
                     .truncationMode(.tail)
             }
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

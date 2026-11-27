@@ -5,7 +5,7 @@ import SwiftUI
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
 /// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
-/// 字幕の持ち上げ量は操作の列の実寸 (controlsHeight) から決めるので、題と操作の列の字は
+/// 字幕の持ち上げ量は操作の列の上端と映像面の実寸から決めるので、題と操作の列の字は
 /// テキストスタイルのまま拡大してよい。題だけは放送の字なので .title2 に揃える (旧 44pt)。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
@@ -24,8 +24,8 @@ struct TVRecordingPlayerView: View {
     @State private var controlsVisible = false
     @State private var hideTask: Task<Void, Never>?
     @State private var focusTask: Task<Void, Never>?
-    /// 操作の列の実寸。字幕を持ち上げる量を決める。実寸が届くまでの 1 フレームは 355 (題 1 行の見積り) を使う
-    @State private var controlsHeight: CGFloat = 355
+    @State private var videoFrame: CGRect?
+    @State private var controlsTop: CGFloat?
     @FocusState private var surfaceFocused: Bool
     @FocusState private var control: Control?
 
@@ -37,8 +37,8 @@ struct TVRecordingPlayerView: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.ignoresSafeArea()
-                video(height: proxy.size.height)
-                if controlsVisible, session.stop == nil, !session.finished {
+                video(safeAreaBottom: proxy.frame(in: .global).maxY)
+                if showsControls {
                     shade(height: 520, opacity: 0.78)
                     controls
                 }
@@ -58,7 +58,7 @@ struct TVRecordingPlayerView: View {
         }
         .onExitCommand {
             // 戻る: 出ているものを閉じる。何も出ていなければ再生の画面を閉じる (3.5.1)
-            if controlsVisible, session.stop == nil, !session.finished {
+            if showsControls {
                 hideControls()
             } else {
                 close()
@@ -73,7 +73,7 @@ struct TVRecordingPlayerView: View {
         }
         // 札から映像の面へ戻ったら、再生中は操作の列を隠す (詳細の sheet を閉じたときも同じ)
         .onChange(of: surfaceFocused) { _, focused in
-            guard focused, controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
+            guard focused, showsControls, session.isPlaying else { return }
             hideControls()
         }
         // 一時停止したら操作の列を出したままにする (再生が始まったらまた隠してよい)
@@ -121,14 +121,19 @@ struct TVRecordingPlayerView: View {
 
     // MARK: - 映像とリモコン
 
-    private func video(height: CGFloat) -> some View {
+    private var showsControls: Bool {
+        controlsVisible && session.stop == nil && !session.finished
+    }
+
+    private func video(safeAreaBottom: CGFloat) -> some View {
         ZStack {
             VideoSurface(
                 layer: session.displayLayer,
                 overlay: session.finished ? nil : captionImage,
                 // 操作の列を出している間は、字幕をその上まで持ち上げる (3.5.2)
-                overlayOffset: controlsVisible ? -captionLift(height: height) : 0
+                overlayOffset: showsControls ? -captionLift(safeAreaBottom: safeAreaBottom) : 0
             )
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { videoFrame = $0 }
             // 映像の面。ここにフォーカスがある間、左右で 10 秒、決定で一時停止・長押しで詳細。
             // 止まった・最後まで観たときはボタンへフォーカスを渡す
             Color.clear
@@ -173,12 +178,16 @@ struct TVRecordingPlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// 字幕を持ち上げる量。操作の列 (下からの実寸 controlsHeight) の上へ、字幕の面の字の下端が来るようにする
-    private func captionLift(height: CGFloat) -> CGFloat {
-        guard height > 0, let page = session.captionPage else { return 0 }
+    /// 字幕の下端を映像面の座標から求め、同じ座標系で操作の列の上端と比べる。
+    private func captionLift(safeAreaBottom: CGFloat) -> CGFloat {
+        guard let videoFrame, videoFrame.height > 0, let page = session.captionPage else { return 0 }
         let span = CaptionLayout.inkSpan(page: page)
-        let top = height - controlsHeight
-        return max(0, span.bottom * height - top + 16)
+        // 355pt は列の初回計測までの暫定値 (題 1 行の見積り)。再表示時は前回の実測値を使う。
+        return CaptionLayout.liftAboveControls(
+            normalizedBottom: span.bottom,
+            videoFrame: videoFrame,
+            controlsTop: controlsTop ?? safeAreaBottom - 355
+        )
     }
 
     // MARK: - 操作の層
@@ -203,7 +212,7 @@ struct TVRecordingPlayerView: View {
                 .padding(.top, 18)
         }
         .padding(.bottom, 48)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { controlsTop = $0 }
     }
 
     private var titleBlock: some View {
