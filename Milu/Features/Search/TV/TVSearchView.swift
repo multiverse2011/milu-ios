@@ -175,25 +175,22 @@ struct TVSearchView: View {
     }
 
     private func recordingCard(_ recording: SearchRecording) -> some View {
-        let isFocused = focus == .recording(recording.id)
-        return TVRecordingCard(
-            title: recording.name,
-            meta: SearchModel.tvRecordingSubtitle(recording),
-            poster: recording.posterPath,
-            unseen: false,
-            recording: recording.isRecording,
-            baseURL: app.server?.url,
-            token: app.server?.token,
-            isFocused: isFocused,
-            playable: recording.playable
-        )
-        .focusable(recording.playable)
-        .focusEffectDisabled()
-        .focused($focus, equals: .recording(recording.id))
-        .gesture(TapGesture().onEnded {
-            guard recording.playable else { return }
+        Button {
             Task { await model.openRecording(id: recording.id) }
-        })
+        } label: {
+            TVRecordingCard(
+                title: recording.name,
+                meta: SearchModel.tvRecordingSubtitle(recording),
+                poster: recording.posterPath,
+                unseen: false,
+                recording: recording.isRecording,
+                baseURL: app.server?.url,
+                token: app.server?.token,
+                playable: recording.playable
+            )
+        }
+        .buttonStyle(.borderless)
+        .disabled(!recording.playable)
         .accessibilityHint(Text(recording.playable ? "" : String(localized: "再生できません")))
     }
 
