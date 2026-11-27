@@ -216,6 +216,32 @@ struct GuideLayoutTests {
         #expect(GuideLayout.tvColumnRange(scrollX: 266 * 3, width: 500, count: 6) == 2..<6)
     }
 
+    @Test func tvHorizontalFollowShowsAServiceThatMovedBeyondTheOldWidth() throws {
+        let program = GuideProgram(
+            id: 10, name: "番組", startAt: 0, endAt: 1000, description: nil,
+            genre: nil, copyNever: false, reservation: nil, recordingId: nil
+        )
+        let services = [8, 5, 3, 2, 4, 9].map { id in
+            GuideService(id: Int64(id), name: "局", mainId: nil, remoteControlKey: nil, logo: nil, programs: [program])
+        }
+        let selectedService: Int64 = 9
+        // 元の 3 局のうち、選択局より右にあった局が左へ移る。
+        let previousServices = [services[4], services[5], services[1]]
+        let column = try #require(services.firstIndex { $0.id == selectedService })
+        #expect(previousServices.firstIndex { $0.id == selectedService } == 1)
+        #expect(column == 5)
+        let viewportWidth = 850.0
+        let visibleWidth = viewportWidth - GuideLayout.tvTimeWidth
+        let x = GuideLayout.tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column,
+            previous: GuideCursorMotion.adjacentColumn(from: column, in: services, by: -1), next: nil
+        )
+        let columnLeft = Double(column) * (GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap)
+        #expect(x > 0)
+        #expect(x <= columnLeft)
+        #expect(columnLeft + GuideLayout.tvColumnWidth <= x + viewportWidth - GuideLayout.tvTimeWidth)
+    }
+
     @Test func tvWindowAroundCursor() {
         // チップに出る日は 0 時の日付 (14〜21)。center も放送日そのもの (0:00) を渡す
         let first = date(14, 0)

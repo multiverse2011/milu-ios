@@ -415,7 +415,7 @@ import Testing
         let day = GuideLayout.broadcastDay(for: now)
         let next = dayOffset(1, from: day)
         let until = Box<Int64?>(nil)
-        let (model, _, _) = fixture(tvTransport(until: { until.value }), now: now)
+        let (model, _, _) = fixture(tvTransport(until: { until.value }, programOffset: 13 * 3_600_000), now: now)
         await model.tvStart(now: now)
         await model.tvReload(center: next, now: now)
 
@@ -423,6 +423,32 @@ import Testing
         await model.refresh(now: now)
         #expect(model.tvDays == [day])
         #expect(model.tvGuide?.until == until.value)
+        let guide = try #require(model.tvGuide)
+        let nextStart = GuideLayout.broadcastRange(for: next).from
+        let removed = GuideCursor(column: 0, programID: nextStart, anchor: nextStart)
+        let cursor = try #require(GuideCursorMotion.cursorAfterWindowChange(
+            removed, in: guide.services, range: guide.from..<guide.to
+        ))
+        let program = try #require(GuideCursorMotion.program(cursor, in: guide.services)?.program)
+        #expect(cursor.anchor >= program.startAt && cursor.anchor < program.endAt)
+        let ppm = GuideLayout.tvPointsPerMinute
+        let start = Double(guide.from)
+        let anchorY = GuideLayout.offset(of: Double(cursor.anchor), from: start, pointsPerMinute: ppm)
+        let frame = try #require(GuideLayout.frame(
+            start: Double(program.startAt), end: Double(program.endAt),
+            rangeStart: start, rangeEnd: Double(guide.to), pointsPerMinute: ppm
+        ))
+        let viewportHeight = 700.0
+        let cell = frame.top...(frame.top + frame.height)
+        let bounds = GuideLayout.tvScrollRange(
+            origin: start, loadedStart: start, loadedEnd: Double(guide.to), viewportHeight: viewportHeight
+        )
+        let followed = GuideLayout.tvFollowOffset(
+            scrollY: bounds.upperBound, viewportHeight: viewportHeight, anchorY: anchorY, cell: cell, headingHeight: 88
+        )
+        let y = min(max(bounds.lowerBound, followed), bounds.upperBound)
+        #expect((y...(y + viewportHeight)).contains(anchorY))
+        #expect((y...(y + viewportHeight)).overlaps(cell))
     }
 
     @Test(arguments: [-1, 1]) func tvExtendsPastADayWithoutProgramsInTheSelectedService(direction: Int) async throws {
@@ -449,7 +475,7 @@ import Testing
         var moved: GuideCursor?
 
         let move = Task { await model.tvExtend(from: cursor, direction: direction, now: now) { moved = $0 } }
-        await started.wait()
+        #expect(await started.wait())
         #expect(model.tvDays == originalDays)
         #expect(moved == nil)
         await release.open()
@@ -459,6 +485,104 @@ import Testing
         #expect(moved?.programID == targetStart)
         #expect(model.tvDays.contains(target))
         #expect(model.tvDays.count <= 3)
+    }
+
+    @Test func tvRefreshDoesNotCancelAnEdgeSearch() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let next = dayOffset(1, from: base)
+        let edgeDay = dayOffset(2, from: base)
+        let edgeStart = GuideLayout.broadcastRange(for: edgeDay).from
+        let started = Gate()
+        let release = Gate()
+        let stub = tvTransport(before: { _, from in
+            if from == edgeStart {
+                await started.open()
+                await release.wait()
+            }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let nextStart = GuideLayout.broadcastRange(for: next).from
+        let cursor = GuideCursor(column: 0, programID: nextStart, anchor: nextStart)
+        var moved: GuideCursor?
+        let move = Task { await model.tvExtend(from: cursor, direction: 1, now: now) { moved = $0 } }
+        #expect(await started.wait())
+        var refreshing = false
+        let refresh = Task {
+            refreshing = true
+            await model.refresh(now: now)
+        }
+        #expect(await waitUntil { refreshing })
+        await release.open()
+
+        #expect(await move.value == .moved)
+        await refresh.value
+        let target = try #require(moved)
+        let guide = try #require(model.tvGuide)
+        #expect(target.programID == edgeStart)
+        try #require(guide.services.indices.contains(target.column))
+        #expect(guide.services[target.column].id == 3273601024)
+        #expect(model.tvDays.contains(edgeDay))
+    }
+
+    @Test func tvTypeSelectionKeepsTheOldWindowUntilScrollingEnds() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let target = dayOffset(3, from: base)
+        let last = dayOffset(1, from: target)
+        let lastReady = Gate()
+        let stub = tvTransport(before: { type, from in
+            if type == "CS", from == GuideLayout.broadcastRange(for: last).from {
+                await lastReady.open()
+            }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let oldWindow = model.tvGuide
+        let oldDays = model.tvDays
+        model.tvSetScrollAnimating(true)
+        #expect(model.tvSelectType(.CS))
+        var windowAtReturn: GuideResponse?
+        let selection = Task {
+            let result = await model.tvReload(center: target, now: now, explicit: true)
+            windowAtReturn = model.tvGuide
+            return result
+        }
+        #expect(await lastReady.wait())
+        #expect(!(await waitUntil(for: .milliseconds(150)) { windowAtReturn != nil }))
+        #expect(model.tvGuide == oldWindow)
+        #expect(model.tvDays == oldDays)
+        #expect(model.selectedType == .GR)
+        model.tvSetScrollAnimating(false)
+
+        #expect(await selection.value)
+        #expect(windowAtReturn?.type == .CS)
+        #expect(model.tvDays.contains(target))
+        #expect(model.selectedType == .CS)
+    }
+
+    @Test func tvEdgeAppliesANewUntilAndDoesNotAskPastItAgain() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let next = dayOffset(1, from: base)
+        let nextStart = GuideLayout.broadcastRange(for: next).from
+        let outsideStart = GuideLayout.broadcastRange(for: dayOffset(2, from: base)).from
+        let newUntil = nextStart - 10 * 3_600_000
+        let stub = tvTransport(until: { nil }, untilForDay: { $0 == outsideStart ? newUntil : nil })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let cursor = GuideCursor(column: 0, programID: nextStart, anchor: nextStart)
+
+        #expect(await model.tvExtend(from: cursor, direction: 1, now: now) == .exhausted)
+        #expect(model.tvDays == [base])
+        #expect(model.menuDays(now: now) == [base])
+        #expect(model.tvGuide?.until == newUntil)
+        let baseStart = GuideLayout.broadcastRange(for: base).from
+        let remaining = GuideCursor(column: 0, programID: baseStart, anchor: baseStart)
+        #expect(await model.tvExtend(from: remaining, direction: 1, now: now) == .exhausted)
+        let outsideRequests = stub.requests.filter { $0.url?.query?.contains("from=\(outsideStart)&") == true }
+        #expect(outsideRequests.count == 1)
     }
 
     @Test func tvReportsAnExhaustedTopWhenEarlierDaysHaveOnlyOtherServices() async throws {
@@ -524,12 +648,12 @@ import Testing
         let (model, _, _) = fixture(stub, now: now)
         await model.tvStart(now: now)
         let prefetch = Task { await model.tvReload(center: target, now: now) }
-        await started.wait()
+        #expect(await started.wait())
         let selection = Task {
             selecting.value = true
             return await model.tvReload(center: target, now: now, explicit: true)
         }
-        while !selecting.value { await Task.yield() }
+        #expect(await waitUntil { selecting.value })
         await release.open()
 
         #expect(await selection.value)
@@ -565,9 +689,9 @@ import Testing
         let (model, _, _) = fixture(stub, now: now)
         await model.tvStart(now: now)
         let firstA = Task { await model.tvReload(center: a, now: now, explicit: true) }
-        await firstAStarted.wait()
+        #expect(await firstAStarted.wait())
         let readB = Task { await model.tvReload(center: b, now: now, explicit: true) }
-        await bStarted.wait()
+        #expect(await bStarted.wait())
 
         let lastA = await model.tvReload(center: a, now: now, explicit: true)
         await releaseB.open()
@@ -669,7 +793,7 @@ import Testing
         }
         let (model, _, _) = fixture(stub, now: now)
         let loading = Task { await model.tvReload(center: day, now: now) }
-        while !started.value { await Task.yield() }
+        #expect(await waitUntil { started.value })
         model.tvSelectType(.CS)
         let applied = await model.tvReload(center: day, now: now)
         #expect(applied)
@@ -679,6 +803,15 @@ import Testing
         #expect(model.selectedType == .CS)
         #expect(model.tvGuide?.type == .CS)
         #expect(model.tvGuide?.services.first?.programs.isEmpty == false)
+    }
+
+    private func waitUntil(for duration: Duration = .seconds(3), _ condition: () -> Bool) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + duration
+        while !condition(), clock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
     }
 
     private func fixedNow() -> Date {
@@ -693,6 +826,8 @@ import Testing
     /// `fails` は from (放送日の 4:00) で決める。from/to が読めない要求は失敗にする
     private func tvTransport(
         until: @escaping @Sendable () -> Int64? = { nil },
+        untilForDay: @escaping @Sendable (Int64) -> Int64? = { _ in nil },
+        programOffset: Int64 = 0,
         fails: @escaping @Sendable (Int64) -> Bool = { _ in false },
         empty: @escaping @Sendable (Int64) -> Bool = { _ in false },
         before: @escaping @Sendable (String, Int64) async throws -> Void = { _, _ in }
@@ -712,9 +847,9 @@ import Testing
             let type = String(typePart.dropFirst(5))
             try await before(type, from)
             guard !fails(from) else { throw URLError(.timedOut) }
-            let untilValue = until().map { "\($0)" } ?? "null"
+            let untilValue = (untilForDay(from) ?? until()).map { "\($0)" } ?? "null"
             let programFields = """
-            "name":"番組","startAt":\(from),"endAt":\(from + 3600000),
+            "name":"番組","startAt":\(from + programOffset),"endAt":\(from + programOffset + 3_600_000),
             "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null
             """
             let programs = empty(from) ? "" : "{\"id\":\(from),\(programFields)}"
@@ -732,17 +867,19 @@ import Testing
 
 /// テスト用の待ち合わせ。`open()` まで `wait()` を止める
 private actor Gate {
-    private var waiters: [CheckedContinuation<Void, Never>] = []
     private var opened = false
 
-    func wait() async {
-        if opened { return }
-        await withCheckedContinuation { waiters.append($0) }
+    @discardableResult
+    func wait(for duration: Duration = .seconds(3)) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + duration
+        while !opened, clock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return opened
     }
 
     func open() {
         opened = true
-        waiters.forEach { $0.resume() }
-        waiters = []
     }
 }

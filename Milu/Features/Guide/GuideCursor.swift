@@ -43,6 +43,22 @@ nonisolated enum GuideCursorMotion {
         return GuideCursor(column: column, programID: program.id, anchor: anchor)
     }
 
+    /// 外れた放送日の代わりに番組を選び、そのマスの中に基準時刻を置く。
+    static func cursorAfterWindowChange(
+        _ cursor: GuideCursor, in services: [GuideService], range: Range<Int64>
+    ) -> GuideCursor? {
+        guard !range.isEmpty else { return nil }
+        let anchor = min(max(cursor.anchor, range.lowerBound), range.upperBound - 1)
+        guard let selected = Self.cursor(at: cursor.column, anchor: anchor, in: services)
+                ?? fallbackCursor(from: cursor.column, anchor: anchor, in: services),
+              let (_, program) = Self.program(selected, in: services)
+        else { return nil }
+        let start = max(range.lowerBound, program.startAt)
+        let end = min(range.upperBound, program.endAt)
+        guard start < end else { return nil }
+        return GuideCursor(column: selected.column, programID: selected.programID, anchor: min(max(anchor, start), end - 1))
+    }
+
     /// その列で選ぶ (決定で開く) カーソル。焦点の列なら、強調しているカーソルそのもの。
     /// 基準の時刻から引き直すと、番組が重なっている所や、基準の時刻が番組の外にあるときに
     /// 別の番組を指すことがある。ほかの列は基準の時刻から引く。

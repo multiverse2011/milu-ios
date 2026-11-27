@@ -60,20 +60,49 @@ final class GuideModel: ProgramSheetModel {
     private(set) var tvGuide: GuideResponse?
     private(set) var tvDidFail = false
     private var tvResponses: [Int64: GuideResponse] = [:]
+    /// 現在の世代の読みだけが、窓とキャッシュを更新できる。
     private var tvGeneration = 0
     /// 最後に表に採用したカーソルの放送日 (SSE の読み直しに使う)
     private var tvCenter: Date?
+    /// 有効な処理は窓の読みか端の探索のどちらか 1 つ。
     private var tvLoading: TVLoading?
     private var tvRequestedType: ServiceType?
     private var tvIsScrollAnimating = false
-    private var tvPendingWindow: TVWindow?
+    /// 補間中の次の窓は最大 1 つ。種別変更の呼び出し元にはその採否を返す。
+    private var tvPendingWindow: TVPendingWindow?
     private var isTVGuide = false
 
-    private struct TVLoading {
+    private enum TVLoading {
+        case window(TVWindowRead)
+        case edge(Task<TVEdgeResult, Never>)
+
+        func cancel() {
+            switch self {
+            case .window(let read): read.task.cancel()
+            case .edge(let task): task.cancel()
+            }
+        }
+
+        func waitIfInteractive() async -> Bool {
+            switch self {
+            case .window(let read) where read.explicit: _ = await read.task.value
+            case .edge(let task): _ = await task.value
+            case .window: return false
+            }
+            return true
+        }
+    }
+
+    private struct TVWindowRead {
         let center: Date
         let type: ServiceType
         let task: Task<Bool, Never>
         var explicit: Bool
+    }
+
+    private struct TVPendingWindow {
+        let window: TVWindow
+        var selection: CheckedContinuation<Bool, Never>?
     }
 
     private struct TVWindow {
@@ -119,8 +148,9 @@ final class GuideModel: ProgramSheetModel {
     /// 読み直し。tvOS は窓を、iOS は 1 日を読む
     func refresh(now: Date = Date()) async {
         if isTVGuide {
-            while let loading = tvLoading, loading.explicit { _ = await loading.task.value }
-            let center = tvPendingWindow?.center ?? tvLoading?.center ?? tvCenter ?? selectedDay
+            while let loading = tvLoading, await loading.waitIfInteractive() {}
+            let readingCenter: Date? = if case .window(let read) = tvLoading { read.center } else { nil }
+            let center = tvPendingWindow?.window.center ?? readingCenter ?? tvCenter ?? selectedDay
             await tvReload(center: center, now: now, force: true)
         } else {
             await reload()
@@ -129,7 +159,11 @@ final class GuideModel: ProgramSheetModel {
 
     /// 日付のメニューに並べる日。今日から 8 日ぶんで、until より先は並べない (3.5)
     var menuDays: [Date] {
-        GuideLayout.menuDays(now: Date(), until: isTVGuide ? tvGuide?.until : guide?.until)
+        menuDays(now: Date())
+    }
+
+    func menuDays(now: Date) -> [Date] {
+        GuideLayout.menuDays(now: now, until: isTVGuide ? tvGuide?.until : guide?.until)
     }
 
     /// 表の先頭 (UNIX ミリ秒)。セッション中は動かさない
@@ -213,20 +247,31 @@ final class GuideModel: ProgramSheetModel {
     @discardableResult
     func tvReload(center: Date, now: Date = Date(), force: Bool = false, explicit: Bool = false) async -> Bool {
         let type = tvRequestedType ?? selectedType
-        if let loading = tvLoading {
-            if loading.center == center, loading.type == type, !force {
-                if explicit { tvLoading?.explicit = true }
-                return await loading.task.value
+        switch tvLoading {
+        case .window(var read):
+            if read.center == center, read.type == type, !force {
+                if explicit {
+                    read.explicit = true
+                    tvLoading = .window(read)
+                }
+                return await read.task.value
             }
-            if loading.explicit, !explicit { return false }
+            if read.explicit, !explicit { return false }
+        case .edge where !explicit: return false
+        default: break
         }
         let explicit = explicit || tvRequestedType != nil
-        if !force, let pending = tvPendingWindow, pending.center == center, pending.guide.type == type {
-            if explicit { adoptTVWindow(pending) }
+        if !force, let pending = tvPendingWindow?.window, pending.center == center, pending.guide.type == type {
+            if explicit { resolveTVPending(adopt: true) }
             return pending.days.contains(center)
         }
+        let pending = tvPendingWindow?.window
+        let pendingUntil = pending?.guide.until
+        let knownUntil = pending?.guide.type == type && pendingUntil != tvGuide?.until ? pendingUntil : nil
+        if !force, let knownUntil, key(center) >= knownUntil { return false }
 
-        invalidateTVRead()
+        // 同じ窓を強制更新している間も、探索で分かった上限は送りの完了時に適用できる。
+        invalidateTVRead(keepPending: force && pending?.center == center && knownUntil != nil)
         let generation = tvGeneration
         isTVGuide = true
         if tvBase == nil { tvBase = center }
@@ -246,28 +291,34 @@ final class GuideModel: ProgramSheetModel {
             guard generation == tvGeneration else { return false }
             let type = tvRequestedType ?? selectedType
             let window = await readTVWindow(
-                center: center, type: type, now: now, force: force, generation: generation
+                center: center, type: type, now: now, force: force, generation: generation, refreshedUntil: knownUntil
             )
             guard generation == tvGeneration else { return false }
             guard let window else {
                 if tvGuide == nil { tvDidFail = true }
                 return false
             }
-            if tvIsScrollAnimating, tvLoading?.explicit != true {
-                tvPendingWindow = window
+            let applied = window.days.contains(center) || force
+            if tvIsScrollAnimating, window.guide.type != selectedType {
+                return await withCheckedContinuation { continuation in
+                    tvPendingWindow = TVPendingWindow(window: window, selection: continuation)
+                } && applied
+            }
+            if tvIsScrollAnimating, case .window(let read) = tvLoading, !read.explicit {
+                tvPendingWindow = TVPendingWindow(window: window)
             } else {
                 adoptTVWindow(window)
             }
-            return window.days.contains(center) || force
+            return applied
         }
-        tvLoading = TVLoading(center: center, type: type, task: task, explicit: explicit)
+        tvLoading = .window(TVWindowRead(center: center, type: type, task: task, explicit: explicit))
         return await task.value
     }
 
     /// 送りの連鎖が終わるまで、描画中のマスと時刻目盛りの窓を保持する。
     func tvSetScrollAnimating(_ animating: Bool) {
         tvIsScrollAnimating = animating
-        if !animating, let pending = tvPendingWindow { adoptTVWindow(pending) }
+        if !animating { resolveTVPending(adopt: true) }
     }
 
     enum TVEdgeResult: Equatable {
@@ -277,24 +328,58 @@ final class GuideModel: ProgramSheetModel {
     /// 窓の外を隣の日から順に調べ、同じ局の次の番組を見つけるまで表示中の窓を保つ。
     func tvExtend(
         from cursor: GuideCursor, direction: Int, now: Date = Date(),
-        onMove: (GuideCursor) -> Void = { _ in }
+        onMove: @escaping (GuideCursor) -> Void = { _ in }
     ) async -> TVEdgeResult {
-        guard direction == -1 || direction == 1, tvLoading?.explicit != true, tvRequestedType == nil,
+        if case .window(let read) = tvLoading, read.explicit { return .waiting }
+        guard !Task.isCancelled, direction == -1 || direction == 1, tvRequestedType == nil,
               let guide = tvGuide,
               let (_, current) = GuideCursorMotion.program(cursor, in: guide.services),
               let base = tvBase, let edge = direction < 0 ? tvDays.first : tvDays.last
         else { return .waiting }
         let serviceID = guide.services[cursor.column].id
-        let last = GuideLayout.menuDays(now: now, until: guide.until).last ?? base
+        let until = tvPendingWindow?.window.guide.until ?? guide.until
+        let last = GuideLayout.menuDays(now: now, until: until).last ?? base
+        guard let first = GuideLayout.calendar.date(byAdding: .day, value: direction, to: edge),
+              base <= first, first <= last else { return .exhausted }
         invalidateTVRead()
         let generation = tvGeneration
-        var day = edge
-        while let next = GuideLayout.calendar.date(byAdding: .day, value: direction, to: day),
-              base <= next, next <= last {
-            day = next
-            guard let response = await readTVDay(day, type: guide.type, generation: generation) else { return .waiting }
-            if let until = response.until, key(day) >= until {
-                if direction > 0 { return .exhausted }
+        let task = Task {
+            defer {
+                if generation == tvGeneration { tvLoading = nil }
+            }
+            return await searchTVEdge(
+                from: first, direction: direction, serviceID: serviceID, current: current, type: guide.type,
+                base: base, until: until, now: now, generation: generation, onMove: onMove
+            )
+        }
+        tvLoading = .edge(task)
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func searchTVEdge(
+        from first: Date, direction: Int, serviceID: Int64, current: GuideProgram, type: ServiceType,
+        base: Date, until: Int64?, now: Date, generation: Int, onMove: (GuideCursor) -> Void
+    ) async -> TVEdgeResult {
+        var latestUntil = until
+        var last = GuideLayout.menuDays(now: now, until: until).last ?? base
+        var next: Date? = first
+        var result: TVEdgeResult = .exhausted
+        while let day = next, base <= day, day <= last {
+            next = GuideLayout.calendar.date(byAdding: .day, value: direction, to: day)
+            guard let response = await readTVDay(day, type: type, generation: generation) else {
+                result = .waiting
+                break
+            }
+            if let reported = response.until {
+                latestUntil = latestUntil == until ? reported : min(latestUntil ?? reported, reported)
+                last = GuideLayout.menuDays(now: now, until: latestUntil).last ?? base
+            }
+            if let latestUntil, key(day) >= latestUntil {
+                if direction > 0 { break }
                 continue
             }
 
@@ -308,26 +393,63 @@ final class GuideModel: ProgramSheetModel {
             guard let program else { continue }
 
             let window = await readTVWindow(
-                center: day, type: guide.type, now: now, force: false, generation: generation, seed: response
+                center: day, type: type, now: now, force: false, generation: generation,
+                seed: response, refreshedUntil: latestUntil == until ? nil : latestUntil
             )
             guard generation == tvGeneration, !Task.isCancelled, let window,
                   let column = window.guide.services.firstIndex(where: { $0.id == serviceID }),
                   window.guide.services[column].programs.contains(where: { $0.id == program.id })
-            else { return .waiting }
+            else {
+                result = .waiting
+                break
+            }
 
             // 番組の空きを越えるときは、窓と送り先を同じ更新で切り替える。
             adoptTVWindow(window)
             onMove(GuideCursor(column: column, programID: program.id, anchor: max(program.startAt, key(day))))
             return .moved
         }
-        return .exhausted
+        if let latestUntil, latestUntil != tvGuide?.until, generation == tvGeneration, !Task.isCancelled {
+            await applyTVEdgeLimit(latestUntil, now: now, generation: generation)
+        }
+        return result
     }
 
-    private func invalidateTVRead() {
+    /// 探索先に番組が無くても、応答から分かった上限を次の探索と表示に反映する。
+    private func applyTVEdgeLimit(_ until: Int64, now: Date, generation: Int) async {
+        guard let base = tvBase, let guide = tvGuide else { return }
+        let days = tvDays.filter { key($0) < until }
+        let last = GuideLayout.menuDays(now: now, until: until).last ?? base
+        let center = min(tvCenter ?? base, days.last ?? max(base, last))
+        let responses = tvResponses.filter { start, _ in start < until }
+        let window: TVWindow
+        if days.isEmpty, key(center) < until, let read = await readTVWindow(
+            center: center, type: guide.type, now: now, force: false, generation: generation, refreshedUntil: until
+        ) {
+            window = read
+        } else {
+            window = makeTVWindow(center: center, days: days, responses: responses, type: guide.type, until: until)
+        }
+        guard generation == tvGeneration, !Task.isCancelled else { return }
+        if tvIsScrollAnimating {
+            tvPendingWindow = TVPendingWindow(window: window)
+        } else {
+            adoptTVWindow(window)
+        }
+    }
+
+    private func invalidateTVRead(keepPending: Bool = false) {
         tvGeneration += 1
-        tvLoading?.task.cancel()
+        tvLoading?.cancel()
         tvLoading = nil
+        if !keepPending { resolveTVPending(adopt: false) }
+    }
+
+    private func resolveTVPending(adopt: Bool) {
+        guard let pending = tvPendingWindow else { return }
         tvPendingWindow = nil
+        if adopt { adoptTVWindow(pending.window) }
+        pending.selection?.resume(returning: adopt)
     }
 
     private func readTVDay(_ day: Date, type: ServiceType, generation: Int) async -> GuideResponse? {
@@ -368,13 +490,13 @@ final class GuideModel: ProgramSheetModel {
             guard generation == tvGeneration, !Task.isCancelled else { return nil }
         }
 
-        let until = fresh.isEmpty ? knownUntil : fresh.compactMap(\.until).max()
+        let reportedUntil = fresh.compactMap(\.until).max()
+        let until = refreshedUntil.map { min($0, reportedUntil ?? $0) } ?? (fresh.isEmpty ? knownUntil : reportedUntil)
         let eligible = days.filter { day in until.map { key(day) < $0 } ?? true }
         let effectiveCenter: Date
         if let until, key(center) >= until {
             guard let last = GuideLayout.menuDays(now: now, until: until).last, last >= base else {
-                let guide = GuideResponse(type: type, from: tvFrom, to: tvFrom, until: until, services: [])
-                return TVWindow(center: base, days: [], responses: [:], guide: guide)
+                return makeTVWindow(center: base, days: [], responses: [:], type: type, until: until)
             }
             guard force else { return nil }
             if !eligible.contains(last), refreshedUntil == nil {
@@ -390,14 +512,22 @@ final class GuideModel: ProgramSheetModel {
         let before = eligible[..<index].reversed().prefix { responses[key($0)] != nil }
         let after = eligible[index...].prefix { responses[key($0)] != nil }
         let loaded = Array(before.reversed()) + after
-        let adopted = responses.filter { start, _ in loaded.contains { key($0) == start } }
-        guard let merged = Self.merge(Array(adopted.values)) else { return nil }
-        let guide = GuideResponse(type: type, from: merged.from, to: merged.to, until: until, services: merged.services)
-        return TVWindow(center: effectiveCenter, days: loaded, responses: adopted, guide: guide)
+        return makeTVWindow(center: effectiveCenter, days: loaded, responses: responses, type: type, until: until)
+    }
+
+    private func makeTVWindow(
+        center: Date, days: [Date], responses: [Int64: GuideResponse], type: ServiceType, until: Int64?
+    ) -> TVWindow {
+        let adopted = responses.filter { start, _ in days.contains { key($0) == start } }
+        let merged = Self.merge(Array(adopted.values))
+        let guide = GuideResponse(
+            type: type, from: merged?.from ?? tvFrom, to: merged?.to ?? tvFrom, until: until,
+            services: merged?.services ?? []
+        )
+        return TVWindow(center: center, days: days, responses: adopted, guide: guide)
     }
 
     private func adoptTVWindow(_ window: TVWindow) {
-        tvPendingWindow = nil
         tvDays = window.days
         tvGuide = window.guide
         tvResponses = window.responses

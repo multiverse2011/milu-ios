@@ -166,21 +166,8 @@ private struct TVGuideBoard: View {
                 scrollHigh = target
             }
         }
-        // 読み直しで選んだ番組や局が消えたら、カーソルと送りをそろえ直す
-        .onChange(of: guide.services) { _, services in
-            repairFocus(services, now: Date())
-        }
-        .onChange(of: model.tvDays) { _, days in
-            let target = CGPoint(x: scroll.x, y: clampY(scroll.y))
-            withAnimation(nil) {
-                if target != scroll { finishScroll(at: target) }
-                if let current = cursor, !days.isEmpty {
-                    let anchor = min(max(current.anchor, Int64(loadedFrom)), Int64(to) - 1)
-                    if anchor != current.anchor {
-                        cursor = GuideCursorMotion.cursor(at: current.column, anchor: anchor, in: guide.services)
-                    }
-                }
-            }
+        .onChange(of: guide) { previous, current in
+            repairWindow(after: previous, current: current)
         }
         // 列への直接移動と、格子の外にある隣の列への移動を焦点の遷移で扱う。
         .onChange(of: focus) { old, new in
@@ -944,6 +931,29 @@ private struct TVGuideBoard: View {
         return "\(item.serviceName) \(time) \(item.name)"
     }
 
+    private func repairWindow(after previous: GuideResponse, current: GuideResponse) {
+        if previous.from != current.from || previous.to != current.to {
+            let range = Int64(loadedFrom)..<Int64(to)
+            if let cursor, !range.contains(cursor.anchor) {
+                let serviceID = previous.services.indices.contains(cursor.column) ? previous.services[cursor.column].id : nil
+                let column = current.services.firstIndex { $0.id == serviceID } ?? cursor.column
+                let displaced = GuideCursor(column: column, programID: cursor.programID, anchor: cursor.anchor)
+                if let target = GuideCursorMotion.cursorAfterWindowChange(displaced, in: current.services, range: range) {
+                    withAnimation(nil) {
+                        self.cursor = target
+                        if lastColumn != nil || focusColumn != nil { lastColumn = target.column }
+                        follow(target, in: current.services, animated: false)
+                        if focusColumn != nil, opened == nil { focus = .column(target.column) }
+                    }
+                    return
+                }
+            }
+            let target = CGPoint(x: scroll.x, y: clampY(scroll.y))
+            if target != scroll { withAnimation(nil) { finishScroll(at: target) } }
+        }
+        repairFocus(current.services, now: Date())
+    }
+
     /// フォーカスの当たっている列を枠に入れ、その左右の次の列 (番組のある列) を少し見える所まで
     /// 横に送る。tvOS の焦点はクリップの外の的へは移れないので、次へ移れる分を先に出しておく。
     /// 縦は基準の時刻と、画面内に寄せた見出しが読める所まで送る。
@@ -979,7 +989,7 @@ private struct TVGuideBoard: View {
             scrollY: scroll.y, viewportHeight: Double(viewport.height), anchorY: anchorY,
             cell: cell, headingHeight: headingHeight
         )
-        return CGPoint(x: clampX(x), y: clampY(y))
+        return CGPoint(x: clampX(x, serviceCount: services.count), y: clampY(y))
     }
 
     /// 送る。`animated` が false のときは即座に送り、動きの範囲も畳む (開いたとき・後始末)。
