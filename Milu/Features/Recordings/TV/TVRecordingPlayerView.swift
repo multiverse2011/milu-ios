@@ -143,10 +143,11 @@ struct TVRecordingPlayerView: View {
                         break
                     }
                 }
-                // 決定で一時停止・再開、長押しで詳細 (3.5.1)。
-                // 2 つを `exclusively` で組むと tvOS の決定でタップが出ないので、ライブの映像の面と同じく別々に受ける。
-                // 長押しのあとに離したときの決定は、詳細を開いた時点で受け止める
+                // 2 つを `exclusively(before:)` で組むと実機の決定で一時停止しなかった。
+                // 前の LongPressGesture が押下を先に取り、0.6 秒に届かない短い押下が Tap に渡らないためと見ている (推測)。
+                // ライブの映像の面と同じく、2 つを別々に受ける
                 .onTapGesture {
+                    // 長押しで詳細を開いたあとに離した決定は受け止める
                     guard !showDetail else { return }
                     session.togglePlayCommand()
                 }
@@ -155,7 +156,7 @@ struct TVRecordingPlayerView: View {
                 }
         }
         .ignoresSafeArea()
-        // 開いた直後は映像の面に焦点を置く (純正と同じ)。fullScreenCover の中では onAppear の代入では効かない
+        // 開いた直後は映像の面に焦点を置く (純正と同じ)。ライブの映像の面と同じく defaultFocus で当てる
         .defaultFocus($surfaceFocused, true)
     }
 
