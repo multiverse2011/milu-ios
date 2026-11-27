@@ -296,8 +296,8 @@ private struct TVGuideBoard: View {
                     .focusEffectDisabled()
                     .focused($focus, equals: .column(column))
                     .onMoveCommand { move($0) }
-                    // 番組の無い列はタップの当たりも付けない (決定しても開くものが無い)
-                    .gesture(TapGesture().onEnded { open(column: column, now: now) }, including: usable ? .all : .none)
+                    // 決定。番組の無い列は当たりを付けない (決定しても開くものが無い)
+                    .modifier(FocusTap(enabled: usable) { open(column: column, now: now) })
                     // 列は 1 つのまとまりなので、読み上げはその列で選んでいる番組だけにする
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(cursorLabel(column: column, now: now))
@@ -546,10 +546,10 @@ private struct TVGuideBoard: View {
         }
     }
 
-    /// その列で選ぶ番組 (基準の時刻から)
+    /// その列で選ぶ番組 (焦点の列はいま強調しているマス)
     private func program(column: Int, now: Date) -> GuideProgramItem? {
         guard let base = resolvedCursor(now: now),
-              let cursor = GuideCursorMotion.cursor(at: column, anchor: base.anchor, in: guide.services),
+              let cursor = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
               let (c, program) = GuideCursorMotion.program(cursor, in: guide.services)
         else { return nil }
         return GuideProgramItem(service: guide.services[c], program: program)
@@ -655,6 +655,22 @@ private struct TVGuideBoard: View {
 
     private func clampY(_ y: Double) -> Double {
         min(max(0, y), max(0, totalHeight - Double(viewport.height)))
+    }
+}
+
+/// 決定の当たり。番組の無い列は当たりを付けない (決定しても開くものが無い)。
+/// 再生の面と同じく `.onTapGesture` で受ける (実機の決定で動いている書き方)
+private struct FocusTap: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onTapGesture(perform: action)
+        } else {
+            content
+        }
     }
 }
 

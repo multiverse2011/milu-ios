@@ -43,6 +43,16 @@ nonisolated enum GuideCursorMotion {
         return GuideCursor(column: column, programID: program.id, anchor: anchor)
     }
 
+    /// その列で選ぶ (決定で開く) カーソル。焦点の列なら、強調しているカーソルそのもの。
+    /// 基準の時刻から引き直すと、番組が重なっている所や、基準の時刻が番組の外にあるときに
+    /// 別の番組を指すことがある。ほかの列は基準の時刻から引く。
+    static func selectedCursor(inColumn column: Int, from cursor: GuideCursor, in services: [GuideService]) -> GuideCursor? {
+        if cursor.column == column {
+            return program(cursor, in: services) == nil ? nil : cursor
+        }
+        return Self.cursor(at: column, anchor: cursor.anchor, in: services)
+    }
+
     /// 上下。同じ局の前後の番組。基準の時刻は移った番組の開始にする。
     static func vertical(_ cursor: GuideCursor, in services: [GuideService], by delta: Int) -> GuideCursor? {
         guard let (column, program) = program(cursor, in: services),

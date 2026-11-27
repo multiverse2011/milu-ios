@@ -174,6 +174,20 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.fallbackCursor(from: 1, anchor: anchor, in: [station(1, nil), station(2, nil)]) == nil)
     }
 
+    @Test func selectedCursorUsesTheHighlightedProgramInItsColumn() {
+        // 番組が重なっている所 (1 は 10:00–12:00、2 は 11:00–13:00)。基準の時刻 11:00 から
+        // 引き直すと前の番組 (1) を指すが、焦点の列は強調している番組 (2) をそのまま選ぶ
+        let overlapping = [service(1, [(id: 1, start: 10 * 3_600_000, end: 12 * 3_600_000),
+                                       (id: 2, start: 11 * 3_600_000, end: 13 * 3_600_000)])]
+        let cursor = GuideCursor(column: 0, programID: 2, anchor: 11 * 3_600_000)
+        #expect(GuideCursorMotion.cursor(at: 0, anchor: cursor.anchor, in: overlapping)?.programID == 1)
+        #expect(GuideCursorMotion.selectedCursor(inColumn: 0, from: cursor, in: overlapping) == cursor)
+        // ほかの列は基準の時刻から引く
+        #expect(GuideCursorMotion.selectedCursor(inColumn: 1, from: cursor, in: services) == GuideCursor(column: 1, programID: 4, anchor: 11 * 3_600_000))
+        // 消えた番組を指すカーソルは選ばない
+        #expect(GuideCursorMotion.selectedCursor(inColumn: 0, from: GuideCursor(column: 0, programID: 99, anchor: 0), in: overlapping) == nil)
+    }
+
     @Test func staleCursorIsNotFound() {
         #expect(GuideCursorMotion.program(GuideCursor(column: 0, programID: 99, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.program(GuideCursor(column: 9, programID: 1, anchor: 0), in: services) == nil)
