@@ -53,5 +53,7 @@ struct TVMenuOption: View {
             }
         }
         .accessibilityAddTraits(selected ? .isSelected : [])
+        // チェックの絵 (「チェックマーク」) を読ませず、行の題だけを読む。選択は isSelected で伝わる
+        .accessibilityLabel(Text(title))
     }
 }

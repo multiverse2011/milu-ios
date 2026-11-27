@@ -70,10 +70,13 @@ struct TVRecordingPlayerView: View {
             focusTask?.cancel()
             Task { await session.close() }
         }
-        // 札から映像の面へ戻ったら、再生中は操作の列を隠す (詳細の sheet を閉じたときも同じ)
+        // 札から映像の面へ戻ったら、再生中は操作の列を隠す (詳細の sheet を閉じたときも同じ)。
+        // メニューを閉じたときも焦点が面へ戻ることがあり、すぐ隠すと選んだ直後に列が消えて
+        // ボタンが効かないように見える。4 秒の自動で隠す仕組みに任せる
+        // (面に焦点がある間だけ隠れ、列へ戻れば取り消される)
         .onChange(of: surfaceFocused) { _, focused in
             guard focused, controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
-            hideControls()
+            scheduleHide()
         }
         // 一時停止したら操作の列を出したままにする (再生が始まったらまた隠してよい)
         .onChange(of: session.isPlaying) { _, playing in
@@ -411,10 +414,15 @@ struct TVRecordingPlayerView: View {
         if showsCaptions || showsCM {
             let captions = session.captionsOn ? String(localized: "オン") : String(localized: "オフ")
             let cm = session.cmSkipEnabled ? String(localized: "オン") : String(localized: "オフ")
-            // 両方まとめたときは、どちらの状態も外から分かるようにする
+            // 両方まとめたときは、どちらの状態も外から分かるようにする。
+            // 値は状態だけ (「オン・オン」)。CM は題「字幕・CM」が示す
             let showsBoth = showsCaptions && showsCM
             let name: LocalizedStringKey = showsBoth ? "字幕・CM" : (showsCaptions ? "字幕" : "CM 飛ばし")
-            let value = showsBoth ? "\(captions)・CM \(cm)" : (showsCaptions ? captions : cm)
+            let value = showsBoth ? "\(captions)・\(cm)" : (showsCaptions ? captions : cm)
+            // 読み上げは、どちらの状態かが分かるよう項目名を添える
+            let spoken = showsBoth
+                ? "\(String(localized: "字幕")) \(captions)、\(String(localized: "CM 飛ばし")) \(cm)"
+                : value
             Menu {
                 if showsCaptions {
                     Section("字幕") {
@@ -442,7 +450,7 @@ struct TVRecordingPlayerView: View {
             .buttonStyle(.bordered)
             .focused($control, equals: .captions)
             .accessibilityLabel(Text(name))
-            .accessibilityValue(Text(value))
+            .accessibilityValue(Text(spoken))
         }
     }
 
