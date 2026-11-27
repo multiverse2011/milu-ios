@@ -5,7 +5,8 @@ import SwiftUI
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
 /// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
-/// 操作の列と帯の高さ (340/520/620) から字幕の持ち上げ量を決めているので、映像の上の字は固定の大きさのままにする。
+/// 操作の列の高さ (controlsHeight) から字幕の持ち上げ量を決めているので、題と操作の列の字は固定の大きさのままにする。
+/// 題だけは放送の字なので .title2 に揃える (旧 44pt。その差は controlsHeight に足してある)。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
     /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
@@ -170,7 +171,7 @@ struct TVRecordingPlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// 字幕を持ち上げる量。操作の列 (下から約 340pt) の上へ、字幕の面の字の下端が来るようにする
+    /// 字幕を持ち上げる量。操作の列 (下から約 353pt) の上へ、字幕の面の字の下端が来るようにする
     private func captionLift(height: CGFloat) -> CGFloat {
         guard height > 0, let page = session.captionPage else { return 0 }
         let span = CaptionLayout.inkSpan(page: page)
@@ -178,8 +179,9 @@ struct TVRecordingPlayerView: View {
         return max(0, span.bottom * height - top + 16)
     }
 
-    /// 操作の列の高さの見積り (題・シークバー・時刻・札・下の余白)
-    private static let controlsHeight: CGFloat = 340
+    /// 操作の列の高さの見積り (題・シークバー・時刻・札・下の余白)。
+    /// 340 は題が旧 44pt のときの値。DenpaFont を .title2 (tvOS で 57pt) にした差 13 を足す
+    private static let controlsHeight: CGFloat = 353
 
     // MARK: - 操作の層
 
@@ -458,7 +460,7 @@ struct TVRecordingPlayerView: View {
         VStack(spacing: 14) {
             ProgressView()
             Text("再接続中…")
-                .font(.system(size: 30, weight: .semibold))
+                .font(.title3.weight(.semibold))
         }
         .padding(36)
         .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 22))
@@ -467,11 +469,11 @@ struct TVRecordingPlayerView: View {
     private func errorOverlay(_ stop: RecordingSession.Stop) -> some View {
         VStack(spacing: 10) {
             Text(title(of: stop))
-                .font(.system(size: 40, weight: .bold))
+                .font(.title2.bold())
                 .multilineTextAlignment(.center)
             if !message(of: stop).isEmpty {
                 Text(message(of: stop))
-                    .font(.system(size: 28))
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -519,11 +521,11 @@ struct TVRecordingPlayerView: View {
             shade(height: 620, opacity: 0.85)
             VStack(alignment: .leading, spacing: 8) {
                 Text("最後まで観ました")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                 Text(session.recording.title)
                     .font(DenpaFont.font(.title2))
                     .fontWeight(.bold)
-                    .foregroundStyle(.white.opacity(0.86))
+                    .foregroundStyle(.primary)
                 HStack(spacing: 20) {
                     Button("一覧へ戻る", action: close)
                         .buttonStyle(.bordered)
