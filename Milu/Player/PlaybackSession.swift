@@ -89,6 +89,8 @@ final class PlaybackSession {
     /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたとみなす間隔
     private static let toggleWindow: TimeInterval = 0.4
     private var lastToggleAt = Date.distantPast
+    /// 押下の時刻。テストから差し替える
+    private let clock: () -> Date
 
     init(
         baseURL: URL,
@@ -98,6 +100,7 @@ final class PlaybackSession {
         onInvalidToken: @escaping @MainActor (URL) -> Void,
         onNeedsPairing: @escaping @MainActor (URL) -> Void,
         playable: [OfferCodec] = Playable.formats,
+        clock: @escaping () -> Date = { Date() },
         startLoader: @escaping (StreamLoader) -> Void = { $0.start() }
     ) {
         self.devicePlayable = playable
@@ -110,6 +113,7 @@ final class PlaybackSession {
         self.nowPlaying = nowPlaying
         self.onInvalidToken = onInvalidToken
         self.onNeedsPairing = onNeedsPairing
+        self.clock = clock
         self.captionsOn = defaults.object(forKey: "captionsOn") as? Bool ?? true
     }
 
@@ -136,6 +140,8 @@ final class PlaybackSession {
         playable = devicePlayable
         policy = LivePlaybackPolicy(playable: playable)
         currentCodec = nil
+        // 選局し直しは新しい押下として扱う。直前の押下の控えを新ストリームへ持ち越さない
+        lastToggleAt = .distantPast
         cancelTrial()
         committedRung = PlaybackRules.resolveRung(defaults.integer(forKey: "liveRung"))
         selectedRung = committedRung
@@ -329,24 +335,24 @@ final class PlaybackSession {
     /// 決定・再生/一時停止ボタンと Now Playing の play/pause/toggle は、同じ押下ならここへ 2 度来る。
     /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
     @discardableResult
-    func play(now: Date = Date()) -> Bool {
+    func play() -> Bool {
         guard service != nil, !closed, stop == nil else { return false }
-        guard claimPress(now) else { return true }
+        guard claimPress() else { return true }
         return resume()
     }
 
     /// ライブにはタイムシフトが無い (D17) ので、一時停止で接続を閉じてチューナーを空ける。
     @discardableResult
-    func pause(now: Date = Date()) -> Bool {
+    func pause() -> Bool {
         guard service != nil, !closed, stop == nil else { return false }
-        guard claimPress(now) else { return true }
+        guard claimPress() else { return true }
         return suspend()
     }
 
     @discardableResult
-    func togglePlayPause(now: Date = Date()) -> Bool {
+    func togglePlayPause() -> Bool {
         guard service != nil, !closed, stop == nil else { return false }
-        guard claimPress(now) else { return true }
+        guard claimPress() else { return true }
         if phase == .paused {
             return resume()
         }
@@ -355,7 +361,8 @@ final class PlaybackSession {
 
     /// 押下を控える。窓の外なら控えて true、2 度目なら false。
     /// 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
-    private func claimPress(_ now: Date) -> Bool {
+    private func claimPress() -> Bool {
+        let now = clock()
         guard now.timeIntervalSince(lastToggleAt) >= Self.toggleWindow else { return false }
         lastToggleAt = now
         return true

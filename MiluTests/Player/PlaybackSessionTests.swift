@@ -14,7 +14,8 @@ import Testing
         nowPlaying: NowPlayingController = NowPlayingController(backend: SpyNowPlayingBackend()),
         defaults: UserDefaults? = nil,
         playable: [OfferCodec] = Playable.formats,
-        startLoader: ((StreamLoader) -> Void)? = nil
+        startLoader: ((StreamLoader) -> Void)? = nil,
+        clock: @escaping () -> Date = { Date() }
     ) -> PlaybackSession {
         let defaults = defaults ?? makeDefaults()
         return PlaybackSession(
@@ -25,6 +26,7 @@ import Testing
             onInvalidToken: { _ in },
             onNeedsPairing: { _ in },
             playable: playable,
+            clock: clock,
             startLoader: startLoader ?? { $0.start() }
         )
     }
@@ -77,10 +79,11 @@ import Testing
         #expect(session.stop == nil)
     }
 
-    @Test func nowPlayingUpdatesAndRemoteCommandsPauseAndResumeLive() async {
+    @Test func nowPlayingUpdatesAndRemoteCommandsPauseAndResumeLive() {
         let backend = SpyNowPlayingBackend()
         let nowPlaying = NowPlayingController(backend: backend)
-        let session = makeSession(nowPlaying: nowPlaying)
+        let clock = Box(Date())
+        let session = makeSession(nowPlaying: nowPlaying, clock: { clock.value })
 
         session.open(makeService(programTitle: "朝ドラ"), liveCodecs: [.h264])
         session.receive(RendererState(
@@ -108,8 +111,8 @@ import Testing
         #expect(session.phase == .paused)
         #expect(backend.info?.title == "あさイチ")
 
-        // 押し直しは同じ押下ではない。控えの窓 (0.4 秒) より間をあける
-        try? await Task.sleep(for: .milliseconds(450))
+        // 押し直しは同じ押下ではない。時計を進めて間をあける
+        clock.value = clock.value.addingTimeInterval(1)
         #expect(nowPlaying.handlePlay())
         #expect(session.phase == .loading)
         #expect(backend.info?.rate == 1)
@@ -123,7 +126,8 @@ import Testing
     @Test func pauseCommandThenSelectIsTheSamePress() {
         let backend = SpyNowPlayingBackend()
         let nowPlaying = NowPlayingController(backend: backend)
-        let session = makeSession(nowPlaying: nowPlaying)
+        let clock = Box(Date())
+        let session = makeSession(nowPlaying: nowPlaying, clock: { clock.value })
         session.open(makeService(), liveCodecs: [.h264])
         session.receive(RendererState(
             isPlaying: true,
@@ -142,15 +146,16 @@ import Testing
         #expect(session.phase == .paused)
 
         // 同じ押下が決定として届いても、止まったまま
-        let pressed = Date()
-        #expect(session.togglePlayPause(now: pressed.addingTimeInterval(0.1)))
+        clock.value = clock.value.addingTimeInterval(0.1)
+        #expect(session.togglePlayPause())
         #expect(session.phase == .paused)
     }
 
     /// 決定・再生/一時停止ボタンと Now Playing の toggle。同じ押下が 2 度届いても 1 度だけ動き、
     /// 間をあけた押下は選局し直してその時点のライブへ戻る (D17)
     @Test func togglePlayPauseIgnoresTheSamePressTwice() {
-        let session = makeSession()
+        let clock = Box(Date())
+        let session = makeSession(clock: { clock.value })
         session.open(makeService(), liveCodecs: [.h264])
         session.receive(RendererState(
             isPlaying: true,
@@ -164,22 +169,24 @@ import Testing
         ))
         #expect(session.phase == .playing)
 
-        let pressed = Date()
-        #expect(session.togglePlayPause(now: pressed))
+        #expect(session.togglePlayPause())
         #expect(session.phase == .paused)
 
         // 同じ押下がもう 1 つの経路から届いても、止まったまま。
         // 捨てた押下も「扱った」として true を返す (Now Playing に失敗を返さない)
-        #expect(session.togglePlayPause(now: pressed.addingTimeInterval(0.1)))
+        clock.value = clock.value.addingTimeInterval(0.1)
+        #expect(session.togglePlayPause())
         #expect(session.phase == .paused)
 
         // 間をあけた押下で再開する (接続を開き直すので .loading から)
-        #expect(session.togglePlayPause(now: pressed.addingTimeInterval(1)))
+        clock.value = clock.value.addingTimeInterval(1)
+        #expect(session.togglePlayPause())
         #expect(session.phase == .loading)
 
         // 閉じたあとは動かさない
         session.close()
-        #expect(!session.togglePlayPause(now: pressed.addingTimeInterval(2)))
+        clock.value = clock.value.addingTimeInterval(1)
+        #expect(!session.togglePlayPause())
         #expect(session.phase == .idle)
     }
 
@@ -411,9 +418,12 @@ import Testing
     }
 
     /// ライブを開き、今の接続が 200 を受けて映ったところまで進める
-    private func playingSession(defaults: UserDefaults) async -> (PlaybackSession, Loaders) {
+    private func playingSession(
+        defaults: UserDefaults,
+        clock: @escaping () -> Date = { Date() }
+    ) async -> (PlaybackSession, Loaders) {
         let loaders = Loaders()
-        let session = makeSession(defaults: defaults) { loaders.all.append($0) }
+        let session = makeSession(defaults: defaults, startLoader: { loaders.all.append($0) }, clock: clock)
         session.open(makeService(), liveCodecs: [.h264])
         injectResponse(into: loaders.last)
         await waitUntil { session.currentCodec == .h264 }
@@ -616,7 +626,8 @@ import Testing
 
     @Test func livePausedRungIsChosenWithoutTrying() async {
         let defaults = makeDefaults()
-        let (session, loaders) = await playingSession(defaults: defaults)
+        let clock = Box(Date())
+        let (session, loaders) = await playingSession(defaults: defaults, clock: { clock.value })
         session.pause()
         let count = loaders.all.count
         session.selectRung(2)
@@ -625,8 +636,9 @@ import Testing
         #expect(session.phase == .paused)
         #expect(session.selectedRung == 2)
         #expect(defaults.integer(forKey: "liveRung") == 2)
-        // 押し直しは同じ押下ではない。控えの窓 (0.4 秒) より間をあける
-        session.play(now: Date().addingTimeInterval(1))
+        // 押し直しは同じ押下ではない。時計を進めて間をあける
+        clock.value = clock.value.addingTimeInterval(1)
+        session.play()
         #expect(rungParam(session.currentStreamURL) == "2")
         session.close()
     }
@@ -687,7 +699,8 @@ import Testing
 
     @Test func livePauseDuringTrialCommitsChosenRung() async {
         let defaults = makeDefaults()
-        let (session, loaders) = await playingSession(defaults: defaults)
+        let clock = Box(Date())
+        let (session, loaders) = await playingSession(defaults: defaults, clock: { clock.value })
         session.selectRung(2)
         let trial = loaders.last
         session.pause()
@@ -700,8 +713,9 @@ import Testing
         trial.onReady?("h264", "2")
         await settle()
         #expect(session.phase == .paused)
-        // 押し直しは同じ押下ではない。控えの窓 (0.4 秒) より間をあける
-        session.play(now: Date().addingTimeInterval(1))
+        // 押し直しは同じ押下ではない。時計を進めて間をあける
+        clock.value = clock.value.addingTimeInterval(1)
+        session.play()
         #expect(rungParam(session.currentStreamURL) == "2")
         session.close()
     }

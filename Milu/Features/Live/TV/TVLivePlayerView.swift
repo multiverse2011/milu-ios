@@ -168,6 +168,9 @@ struct TVLivePlayerView: View {
         .onLongPressGesture(minimumDuration: 0.6) {
             guard overlay == .none else { return }
             longPressConsumed = !openDetail()
+        } onPressingChanged: { pressing in
+            // 離したタップが来ないまま次の押下に移っても、控えを残して 1 回空振りさせない
+            if pressing { longPressConsumed = false }
         }
         .defaultFocus($focus, .video)
     }
