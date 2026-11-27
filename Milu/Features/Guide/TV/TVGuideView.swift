@@ -67,6 +67,10 @@ private struct TVGuideBoard: View {
 
     private static let headerHeight = 64.0
 
+    /// 時刻の列の幅。時の数字と分の札はテキストスタイルで字の大きさの設定に従うので、
+    /// 列も同じ割合で広げる (局の行と格子はずらしにこの値を使うので一緒に動く)
+    @ScaledMetric(relativeTo: .body) private var timeWidth: CGFloat = CGFloat(GuideLayout.tvTimeWidth)
+
     private enum Focus: Hashable {
         case type(ServiceType)
         case day(Date)
@@ -208,7 +212,7 @@ private struct TVGuideBoard: View {
                     .frame(width: GuideLayout.tvColumnWidth, height: Self.headerHeight, alignment: .leading)
                 }
             }
-            .offset(x: GuideLayout.tvTimeWidth - scroll.x)
+            .offset(x: timeWidth - scroll.x)
         }
         .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
         .clipped()
@@ -217,7 +221,7 @@ private struct TVGuideBoard: View {
     private func grid(size: CGSize, now: Date) -> some View {
         ZStack(alignment: .topLeading) {
             columns(size: size, now: now)
-                .offset(x: GuideLayout.tvTimeWidth - scroll.x, y: -scroll.y)
+                .offset(x: timeWidth - scroll.x, y: -scroll.y)
             timeColumn(now: now)
                 .offset(y: -scroll.y)
         }
@@ -285,19 +289,22 @@ private struct TVGuideBoard: View {
                 Text("\(GuideLayout.calendar.component(.hour, from: Date(timeIntervalSince1970: time / 1000)))")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .offset(y: GuideLayout.offset(of: time, from: from, pointsPerMinute: GuideLayout.tvPointsPerMinute) + 6)
             }
             if let nowY = nowOffset(now: now) {
                 Text("\(GuideLayout.calendar.component(.minute, from: now))")
                     .font(.caption.bold())
                     .foregroundStyle(.white)
+                    .lineLimit(1)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 1)
                     .background(Color.red, in: Capsule())
                     .offset(y: nowY - 14)
             }
         }
-        .frame(width: GuideLayout.tvTimeWidth, height: totalHeight, alignment: .topLeading)
+        .frame(width: timeWidth, height: totalHeight, alignment: .topLeading)
         .background(.background)
         .clipped()
     }
@@ -406,7 +413,7 @@ private struct TVGuideBoard: View {
         let margin = 40.0
         let left = Double(column) * columnStep()
         let right = left + GuideLayout.tvColumnWidth
-        let visibleWidth = max(Double(viewport.width) - GuideLayout.tvTimeWidth, 1)
+        let visibleWidth = max(Double(viewport.width) - Double(timeWidth), 1)
         var x = scroll.x
         if left < x + margin {
             x = left - margin
@@ -434,7 +441,7 @@ private struct TVGuideBoard: View {
     }
 
     private func clampX(_ x: Double) -> Double {
-        let visibleWidth = max(Double(viewport.width) - GuideLayout.tvTimeWidth, 1)
+        let visibleWidth = max(Double(viewport.width) - Double(timeWidth), 1)
         return min(max(0, x), max(0, contentWidth - visibleWidth))
     }
 
