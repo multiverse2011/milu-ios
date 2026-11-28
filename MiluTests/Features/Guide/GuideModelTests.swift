@@ -409,6 +409,112 @@ import Testing
         #expect(programRequestDays(stub).filter { $0 == missingStart }.count == 3)
     }
 
+    @Test func tvDownAtTheLastProgramRetriesTheFirstOfTheMissingFinalDays() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let today = dayStart(base)
+        let tomorrow = dayOffset(1, from: base)
+        let tomorrowStart = dayStart(tomorrow)
+        let last = dayStart(dayOffset(2, from: base))
+        let stub = tvTransport(until: { last + 3_600_000 }, before: { _, from in
+            if from > today { throw URLError(.timedOut) }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+
+        let guide = try #require(model.tvGuide)
+        let cursor = try #require(GuideCursorMotion.cursor(at: 0, anchor: today, in: guide.services))
+        let next = GuideCursorMotion.vertical(cursor, in: guide.services, by: 1)
+        #expect(next == nil)
+        let retryDay = try #require(model.tvBlockingDay(after: cursor.anchor, before: next?.anchor))
+        #expect(retryDay == tomorrow)
+        await model.tvRetry(day: retryDay)
+        await model.tvRetry(day: retryDay)
+        #expect(programRequestDays(stub).filter { $0 == tomorrowStart }.count == 2)
+        #expect(programRequestDays(stub).filter { $0 == last }.count == 1)
+    }
+
+    @Test(arguments: ["POST", "DELETE"])
+    func tvRecordingChangeWaitsForTodayWhileLaterDaysRefreshIndependently(method: String) async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let today = dayStart(base)
+        let tomorrow = dayStart(dayOffset(1, from: base))
+        let changed = Box(false)
+        let todayStarted = Gate()
+        let releaseToday = Gate()
+        let tomorrowStarted = Gate()
+        let releaseTomorrow = Gate()
+        let stub = tvTransport(
+            until: { tomorrow + 3_600_000 }, title: { changed.value ? "更新後" : "更新前" },
+            record: { request in
+                #expect(request.httpMethod == method)
+                changed.value = true
+                return reply(request, 200, #"{"recorded":"番組","reserved":true,"state":"scheduled"}"#)
+            },
+            before: { _, from in
+                guard changed.value else { return }
+                if from == today {
+                    await todayStarted.open()
+                    try await releaseToday.requireOpen()
+                } else if from == tomorrow {
+                    await tomorrowStarted.open()
+                    try await releaseTomorrow.requireOpen()
+                }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let item = try #require(model.program(id: today))
+        let done = startOperation {
+            let error = if method == "POST" { await model.reserve(item) } else { await model.cancel(item) }
+            #expect(error == nil)
+        }
+
+        #expect(await todayStarted.wait())
+        #expect(!(await done.wait(for: .milliseconds(30))))
+        await releaseToday.open()
+        #expect(await tomorrowStarted.wait())
+        #expect(await done.wait(for: .seconds(1)))
+        #expect(model.program(id: today)?.name == "更新後")
+        #expect(model.program(id: tomorrow)?.name == "更新前")
+
+        await releaseTomorrow.open()
+        #expect(await done.wait())
+        #expect(await waitUntil { model.program(id: tomorrow)?.name == "更新後" })
+    }
+
+    @Test func tvRefreshRetainsAnAlreadyLoadedDayAndItsCursorWhenItFails() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let tomorrow = dayStart(dayOffset(1, from: base))
+        let last = dayStart(dayOffset(2, from: base))
+        let updating = Box(false)
+        let stub = tvTransport(until: { last + 3_600_000 }, title: { updating.value ? "更新後" : "更新前" }, before: { _, from in
+            if updating.value, from == tomorrow { throw URLError(.timedOut) }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let before = try #require(model.tvGuide)
+        let program = try #require(model.program(id: tomorrow))
+        let cursor = try #require(GuideCursorMotion.cursor(at: 0, anchor: tomorrow, in: before.services))
+        #expect(cursor.programID == tomorrow)
+
+        updating.value = true
+        await model.refresh(now: now)
+
+        let after = try #require(model.tvGuide)
+        #expect(model.program(id: last)?.name == "更新後")
+        #expect(model.program(id: tomorrow) == program)
+        #expect(GuideCursorMotion.cursorAfterRefresh(
+            cursor, previous: before.services, current: after.services, range: model.tvFrom..<model.tvTo,
+            hasResponse: model.tvHasResponse(at: cursor.anchor)
+        ) == cursor)
+        #expect(model.tvBlockingDay(after: dayStart(base), before: last) == nil)
+        await model.tvRetry(day: dayOffset(1, from: base))
+        #expect(programRequestDays(stub).filter { $0 == tomorrow }.count == 2)
+    }
+
     @Test func tvRefreshCancelsTheOldRetryAndKeepsItsSlotUntilTheRequestEnds() async throws {
         let now = fixedNow()
         let missing = dayOffset(1, from: GuideLayout.broadcastDay(for: now))
@@ -687,6 +793,7 @@ import Testing
         programOffset: Int64 = 0,
         crossingBoundary: Int64? = nil,
         empty: @escaping @Sendable (Int64) -> Bool = { _ in false },
+        record: (@Sendable (URLRequest) -> (Data, HTTPURLResponse))? = nil,
         before: @escaping @Sendable (String, Int64) async throws -> Void = { _, _ in }
     ) -> StubTransport {
         StubTransport { request in
@@ -694,6 +801,7 @@ import Testing
             if path.hasSuffix("api/services") {
                 return reply(request, 200, self.servicesJSON)
             }
+            if path.hasSuffix("/record"), let record { return record(request) }
             let query = request.url?.query ?? ""
             guard let typePart = query.split(separator: "&").first(where: { $0.hasPrefix("type=") }),
                   let fromPart = query.split(separator: "&").first(where: { $0.hasPrefix("from=") }),

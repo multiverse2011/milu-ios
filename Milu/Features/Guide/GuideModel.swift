@@ -110,11 +110,11 @@ final class GuideModel: ProgramSheetModel {
         }
     }
 
-    /// 読み直し。tvOS は全日を、iOS は 1 日を読む。
-    func refresh(now: Date = Date()) async {
+    /// 読み直し。tvOS は全日を読む。予約操作は起点の日の読了までを待つ。
+    func refresh(now: Date = Date(), waitForRemainingDays: Bool = true) async {
         if isTVGuide {
             let today = GuideLayout.broadcastDay(for: now)
-            await loadTVGuide(base: tvRequestedType == nil ? tvBase ?? today : today)
+            await loadTVGuide(base: tvRequestedType == nil ? tvBase ?? today : today, waitForRemainingDays: waitForRemainingDays)
         } else {
             await reload()
         }
@@ -208,15 +208,17 @@ final class GuideModel: ProgramSheetModel {
         await loadTVGuide(base: GuideLayout.broadcastDay(for: now))
     }
 
-    private func loadTVGuide(base: Date) async {
+    private func loadTVGuide(base: Date, waitForRemainingDays: Bool = true) async {
         tvGeneration += 1
         let generation = tvGeneration
         tvLoadTask?.cancel()
         tvRetryTask?.cancel()
         tvPendingRetry = nil
         tvDayLoads = Dictionary(uniqueKeysWithValues: tvDays.map { ($0, .loading) })
+        let baseRead = waitForRemainingDays ? nil : AsyncStream<Void>.makeStream()
         let task = Task {
             defer {
+                baseRead?.continuation.finish()
                 if generation == tvGeneration {
                     tvLoadTask = nil
                     tvRequestedType = nil
@@ -250,11 +252,17 @@ final class GuideModel: ProgramSheetModel {
             }
 
             tvRequestedType = nil
+            // 起点の日の結果を反映してから待ち手を解放し、同じ世代で残りを読む。
+            baseRead?.continuation.finish()
             await loadTVRemainingDays(tvDays.filter { $0 != base }, type: type, generation: generation)
         }
         tvLoadTask = task
         await withTaskCancellationHandler {
-            await task.value
+            if let baseRead {
+                for await _ in baseRead.stream {}
+            } else {
+                await task.value
+            }
         } onCancel: {
             task.cancel()
         }
@@ -275,7 +283,8 @@ final class GuideModel: ProgramSheetModel {
                     return
                 }
                 tvDayLoads[day] = nil
-                if tvResponses[day] != response {
+                // 一時的に読めなかった日は、同じ種別の取得済みの応答を残す。
+                if let response, tvResponses[day] != response {
                     tvResponses[day] = response
                     publishTVGuide()
                 }
@@ -289,9 +298,11 @@ final class GuideModel: ProgramSheetModel {
     /// 次の番組までに未取得の日があれば、下送りはそこで待つ。再試行も失敗した日は空きとして進める。
     func tvBlockingDay(after time: Int64, before next: Int64?) -> Date? {
         let start = GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double(time) / 1000))
-        let end = next.map { GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double($0) / 1000)) }
-        return tvDays.first { day in
-            day >= start && day <= (end ?? day) && tvResponses[day] == nil && tvDayLoads[day] != .retried
+        let days = tvDays
+        let nextDay = next.map { GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double($0) / 1000)) }
+        guard let end = nextDay ?? days.last else { return nil }
+        return days.first { day in
+            day >= start && day <= end && tvResponses[day] == nil && tvDayLoads[day] != .retried
         }
     }
 
@@ -438,11 +449,11 @@ final class GuideModel: ProgramSheetModel {
         do {
             let data = try await app.post("api/programs/\(item.id)/record")
             guard let response = try? JSONDecoder().decode(RecordResponse.self, from: data) else {
-                await refresh()
+                await refresh(waitForRemainingDays: false)
                 return nil
             }
             if response.reserved {
-                await refresh()
+                await refresh(waitForRemainingDays: false)
                 return nil
             }
             return response.reason ?? String(localized: "録画できません")
@@ -456,7 +467,7 @@ final class GuideModel: ProgramSheetModel {
     func cancel(_ item: GuideProgramItem) async -> String? {
         do {
             _ = try await app.delete("api/programs/\(item.id)/record")
-            await refresh()
+            await refresh(waitForRemainingDays: false)
             return nil
         } catch {
             return Self.failureMessage(error)
