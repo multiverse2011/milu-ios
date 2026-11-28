@@ -60,6 +60,53 @@ struct GuideLayoutTests {
         #expect(GuideLayout.nowLineLabel(now: now, horizontalSizeClassRegular: true) == "15:21")
     }
 
+    @Test func tvFollowShowsBothLinesAtTheBottom() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 0, viewportHeight: 700, anchorY: 680, cell: 682...1230, headingHeight: 88
+        )
+        #expect(offset == 70)
+    }
+
+    @Test func tvCellHeadingTracksTheViewportAndStaysInsideTheCell() {
+        #expect(GuideLayout.tvCellContentInset(viewportTop: -20, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == 0)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1100, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == 1100)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1512, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == 1512)
+    }
+
+    @Test func tvCellHeadingIsHiddenWhenOnlyPartFits() {
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 1513, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == nil)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: -680, viewportHeight: 700, cellHeight: 1600, headingHeight: 88) == nil)
+        #expect(GuideLayout.tvCellContentInset(viewportTop: 10, viewportHeight: 60, cellHeight: 1600, headingHeight: 88) == nil)
+    }
+
+    @Test func tvFollowKeepsTheAnchorInsideALongProgram() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 1800, viewportHeight: 700, anchorY: 2000, cell: 500...2160, headingHeight: 88
+        )
+        #expect(offset == 1800)
+    }
+
+    @Test func tvFollowMakesRoomForTheHeadingAtTheTop() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 2000, viewportHeight: 700, anchorY: 2070, cell: 500...2080, headingHeight: 88
+        )
+        #expect(offset == 1992)
+    }
+
+    @Test func tvFollowShowsTheHeadingWhenTheProgramIsFarAboveTheAnchor() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 1000, viewportHeight: 700, anchorY: 1950, cell: 100...550, headingHeight: 88
+        )
+        #expect(offset == 462)
+    }
+
+    @Test func tvFollowShowsTheHeadingAfterAMorningBroadcastGap() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 0, viewportHeight: 700, anchorY: 414, cell: 1104...1380, headingHeight: 88
+        )
+        #expect(offset == 492)
+    }
+
     @Test func columns() {
         // 列の幅は iPhone 158pt・iPad 186pt、列の間 2pt
         #expect(GuideLayout.columnWidth(horizontalSizeClassRegular: false) == 158)
@@ -105,6 +152,59 @@ struct GuideLayoutTests {
         #expect(GuideLayout.menuLabel(for: days[0], today: now, calendar: calendar, locale: en) == "Today, Sat 14")
         #expect(GuideLayout.menuLabel(for: days[1], today: now, calendar: calendar, locale: en) == "Sun 15")
         #expect(GuideLayout.menuLabel(for: days[7], today: now, calendar: calendar, locale: en) == "Sat 21")
+    }
+
+    @Test func tvColumnFocusRangesStayInsideTheGrid() {
+        let width = 850 - GuideLayout.tvTimeWidth
+        let edge = 3 * (GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 0, visibleWidth: width) == 0..<262)
+        #expect(GuideLayout.tvColumnFocusRange(3, scrollX: 0, visibleWidth: width) == nil)
+        #expect(GuideLayout.tvColumnFocusRange(3, scrollX: edge - width, visibleWidth: width) == nil)
+        #expect(GuideLayout.tvColumnFocusRange(3, scrollX: edge - width + 1, visibleWidth: width) == (width - 1)..<width)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 242, visibleWidth: width) == 0..<20)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 280, visibleWidth: width) == nil)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 0, visibleWidth: 0) == nil)
+    }
+
+    @Test func tvEdgeTargetIsOnlyNeededForAnOffscreenNeighbor() {
+        let width = 850 - GuideLayout.tvTimeWidth
+        #expect(GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 3, scrollX: 0, visibleWidth: width))
+        #expect(GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 0, scrollX: 280, visibleWidth: width))
+        #expect(!GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 3, scrollX: 19, visibleWidth: width))
+        #expect(!GuideLayout.tvNeedsColumnEdgeTarget(neighbor: nil, scrollX: 0, visibleWidth: width))
+        #expect(!GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 3, scrollX: 0, visibleWidth: 0))
+    }
+
+    @Test(arguments: [3, 5])
+    func tvHorizontalDestinationCreatesAFullWidthFocusTarget(column: Int) {
+        let viewportWidth = 850.0
+        let visibleWidth = viewportWidth - GuideLayout.tvTimeWidth
+        let x = GuideLayout.tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column, previous: 0, next: nil
+        )
+        let back = GuideLayout.tvFollowColumnOffset(
+            scrollX: x, visibleWidth: visibleWidth, column: 0, previous: nil, next: column
+        )
+        let step = GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap
+        for (destination, before, after) in [(column, 0.0, x), (0, x, back)] {
+            #expect(GuideLayout.tvColumnFocusRange(destination, scrollX: before, visibleWidth: visibleWidth) == nil)
+            let left = Double(destination) * step - after
+            let cell = left..<(left + GuideLayout.tvColumnWidth)
+            #expect(GuideLayout.tvColumnFocusRange(destination, scrollX: after, visibleWidth: visibleWidth) == cell)
+            #expect(GuideLayout.tvColumnRange(scrollX: after, width: viewportWidth, count: column + 1).contains(destination))
+        }
+    }
+
+    @Test func tvHorizontalFollowKeepsTheSelectedColumnAcrossAGap() {
+        let width = 850 - GuideLayout.tvTimeWidth
+        let step = GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap
+        let right = GuideLayout.tvFollowColumnOffset(scrollX: 0, visibleWidth: width, column: 5, previous: 0, next: nil)
+        #expect(right <= 5 * step)
+        #expect(right + width >= 5 * step + GuideLayout.tvColumnWidth)
+
+        let left = GuideLayout.tvFollowColumnOffset(scrollX: right, visibleWidth: width, column: 0, previous: nil, next: 5)
+        #expect(left <= 0)
+        #expect(left + width >= GuideLayout.tvColumnWidth)
     }
 
     @Test func tvColumnsStayInsideTheGuide() {
