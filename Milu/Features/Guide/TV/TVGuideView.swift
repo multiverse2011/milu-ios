@@ -65,7 +65,8 @@ private struct TVGuideBoard: View {
     let model: GuideModel
     let onOpen: (GuideProgramItem) -> Void
 
-    private static let headerHeight = 64.0
+    /// 局名の文字サイズに合わせ、見出しと格子の表示域に同じ高さを使う。
+    @ScaledMetric(relativeTo: .callout) private var headerHeight: CGFloat = 64
 
     /// 時刻の列の幅。時の数字と分の札はテキストスタイルで字の大きさの設定に従うので、
     /// 列も同じ割合で広げる (局の行と格子はずらしにこの値を使うので一緒に動く)
@@ -117,7 +118,7 @@ private struct TVGuideBoard: View {
         VStack(spacing: 0) {
             chips(now: now)
             GeometryReader { geo in
-                let size = CGSize(width: geo.size.width, height: max(geo.size.height - Self.headerHeight - 8, 0))
+                let size = CGSize(width: geo.size.width, height: max(geo.size.height - headerHeight - 8, 0))
                 VStack(spacing: 8) {
                     header(width: size.width)
                     grid(size: size, now: now)
@@ -209,12 +210,12 @@ private struct TVGuideBoard: View {
                             .lineLimit(1)
                     }
                     .padding(.horizontal, 12)
-                    .frame(width: GuideLayout.tvColumnWidth, height: Self.headerHeight, alignment: .leading)
+                    .frame(width: GuideLayout.tvColumnWidth, height: headerHeight, alignment: .leading)
                 }
             }
             .offset(x: timeWidth - scroll.x)
         }
-        .frame(width: width, height: Self.headerHeight, alignment: .topLeading)
+        .frame(width: width, height: headerHeight, alignment: .topLeading)
         .clipped()
     }
 

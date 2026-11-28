@@ -164,9 +164,12 @@ struct TVLiveMenuView: View {
                 .padding(.top, 24)
                 .padding(.leading, 4)
             ScrollView(.horizontal) {
-                HStack(spacing: 26) {
-                    ForEach(model.services.filter { $0.type == type }, id: \.id) { service in
-                        stationCard(service)
+                // 一番高いカードに行の高さを揃え、各カードはその高さまで広げる。
+                Grid(alignment: .topLeading, horizontalSpacing: 26) {
+                    GridRow {
+                        ForEach(model.services.filter { $0.type == type }, id: \.id) { service in
+                            stationCard(service)
+                        }
                     }
                 }
                 .padding(.vertical, 16)
@@ -218,9 +221,11 @@ struct TVLiveMenuView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
-            .frame(width: 440, height: 200, alignment: .topLeading)
+            .frame(width: 440, alignment: .leading)
+            .frame(minHeight: 200, maxHeight: .infinity, alignment: .topLeading)
         }
         .buttonStyle(.card)
         .focused($focus, equals: .station(service.id))

@@ -4,6 +4,7 @@ import SwiftUI
 /// 長文を塊ごとに下キーで送るので、行ではなく ScrollView に置く。
 struct TVLicensesView: View {
     var body: some View {
+        let verticalPadding: CGFloat = 40
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Denpa Font")
@@ -19,9 +20,9 @@ struct TVLicensesView: View {
                 .padding(.top, 10)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 40)
+            .padding(.vertical, verticalPadding)
         }
         .navigationTitle("ライセンス")
-        .tvContinueHint()
+        .tvContinueHint(bottomPadding: verticalPadding)
     }
 }

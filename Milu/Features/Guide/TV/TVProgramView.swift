@@ -353,8 +353,9 @@ private struct TVPill<Content: View>: View {
         content
             .font(.callout.weight(bold ? .bold : .regular))
             .foregroundStyle(foreground)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)
-            .frame(height: 44)
+            .frame(minHeight: 44)
             .background(background.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.quaternary), in: RoundedRectangle(cornerRadius: 8))
     }
 }
