@@ -19,13 +19,6 @@ enum TVLiveFocus: Hashable {
     case detailContinue
 }
 
-/// フォーカスの見た目は自前で描くので、ボタン自身には何もしない
-struct TVPlainButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-    }
-}
-
 /// 局ロゴ。`logo` が無い・取れないときは、面に局名の頭 1 字。iPhone の ServiceLogo の tvOS の大きさ版。
 struct TVServiceLogo: View {
     let service: Service

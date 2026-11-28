@@ -7,6 +7,8 @@ import SwiftUI
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
+    /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
+    var onDeleted: () -> Void = {}
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var app
@@ -582,6 +584,7 @@ struct TVRecordingPlayerView: View {
     private func deleteRecording() async {
         do {
             _ = try await app.delete("api/recordings/\(session.recording.id)")
+            onDeleted()
             close()
         } catch AppModel.APIError.http(_, let message) {
             alertMessage = message ?? String(localized: "しばらくしてから、もう一度お試しください。")

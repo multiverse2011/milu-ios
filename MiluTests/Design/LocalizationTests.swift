@@ -122,6 +122,7 @@ struct LocalizationTests {
             "Apple TV",
             "選局しています",
             "視聴中",
+            "いま選んでいる局",
             "字幕 オン",
             "字幕 オフ",
             "● 録画",
@@ -132,7 +133,7 @@ struct LocalizationTests {
             "予約",
             "予約取消",
             // PR 2 (録画・再生。TV-Recordings・TV-RecordingDetail・TV-Player・TV-Chase・TV-PlayerEnd)
-            "長押しで詳細 (説明・削除)",
+            "長押しでメニューから詳細",
             "まだ観ていない",
             "録画はまだありません",
             "番組表で番組を予約すると、録れたものがここに並びます。",

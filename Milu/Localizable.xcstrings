@@ -3257,18 +3257,18 @@
         }
       }
     },
-    "長押しで詳細 (説明・削除)" : {
+    "長押しでメニューから詳細" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hold for details (description, delete)"
+            "value" : "Hold for the menu, then choose Details"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "長押しで詳細 (説明・削除)"
+            "value" : "長押しでメニューから詳細"
           }
         }
       }
@@ -3397,6 +3397,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "視聴中"
+          }
+        }
+      }
+    },
+    "いま選んでいる局" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selected station"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "いま選んでいる局"
           }
         }
       }
