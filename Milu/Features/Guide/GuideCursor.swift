@@ -35,9 +35,9 @@ nonisolated enum GuideCursorMotion {
         return (cursor.column, programs[index])
     }
 
-    /// 指定の局と時刻に置く。そこで放送がなければ番組 ID は空のまま。
+    /// 番組のある局の指定時刻に置く。その時刻に放送がなければ番組 ID は空のまま。
     static func cursor(at column: Int, anchor: Int64, in services: [GuideService]) -> GuideCursor? {
-        guard services.indices.contains(column) else { return nil }
+        guard isUsable(column, in: services) else { return nil }
         let program = services[column].programs.first { $0.startAt <= anchor && anchor < $0.endAt }
         return GuideCursor(column: column, programID: program?.id, anchor: anchor)
     }
@@ -53,7 +53,7 @@ nonisolated enum GuideCursorMotion {
         if range.contains(cursor.anchor) {
             if cursor.programID == nil || !hasResponse {
                 return Self.cursor(at: column, anchor: cursor.anchor, in: current)
-                    ?? fallbackCursor(from: column, anchor: cursor.anchor, in: current)
+                    ?? emptyFallbackCursor(from: column, anchor: cursor.anchor, in: current)
             }
             if let (_, program) = Self.program(remapped, in: current) {
                 if program.startAt <= cursor.anchor, cursor.anchor < program.endAt { return remapped }
@@ -148,6 +148,13 @@ nonisolated enum GuideCursorMotion {
         return nil
     }
 
+    /// 空の時刻から復帰するときは、近い利用可能列へ選択を変えずに移す。
+    private static func emptyFallbackCursor(from column: Int, anchor: Int64, in services: [GuideService]) -> GuideCursor? {
+        fallbackCursor(from: column, anchor: anchor, in: services).map {
+            GuideCursor(column: $0.column, programID: nil, anchor: anchor)
+        }
+    }
+
     /// 読み直しで番組が消えたら、残った番組とその中の基準時刻に置き直す。
     static func repairedCursor(
         _ cursor: GuideCursor?, from column: Int, anchor: Int64, in services: [GuideService]
@@ -156,7 +163,7 @@ nonisolated enum GuideCursorMotion {
             if program(cursor, in: services) != nil { return cursor }
             if cursor.programID == nil {
                 return Self.cursor(at: cursor.column, anchor: cursor.anchor, in: services)
-                    ?? fallbackCursor(from: column, anchor: anchor, in: services)
+                    ?? emptyFallbackCursor(from: column, anchor: cursor.anchor, in: services)
             }
         }
         guard let replacement = fallbackCursor(from: column, anchor: anchor, in: services),

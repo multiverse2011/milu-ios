@@ -270,4 +270,25 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.program(GuideCursor(column: 9, programID: 1, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.vertical(GuideCursor(column: 0, programID: 99, anchor: 0), in: services, by: 1) == nil)
     }
+
+    @Test func refreshMovesToAUsableColumnWhenTheStationRemainsButLosesItsPrograms() {
+        let previous = [service(1, [(id: 1, start: 40, end: 60)]), service(2, [(id: 2, start: 10, end: 20)])]
+        let current = [service(1, []), previous[1]]
+        let selected = GuideCursor(column: 0, programID: 1, anchor: 50)
+
+        #expect(GuideCursorMotion.cursor(at: 0, anchor: 50, in: current) == nil)
+        #expect(GuideCursorMotion.cursorAfterRefresh(
+            selected, previous: previous, current: current, range: 0..<100, hasResponse: false
+        ) == GuideCursor(column: 1, programID: nil, anchor: 50))
+    }
+
+    @Test func repairKeepsAnEmptySelectionWhenItsStationRemainsButLosesItsPrograms() throws {
+        let previous = [service(1, [(id: 1, start: 10, end: 20)]), service(2, [(id: 2, start: 40, end: 60)])]
+        let empty = try #require(GuideCursorMotion.cursor(at: 0, anchor: 50, in: previous))
+        let current = [service(1, []), previous[1]]
+
+        #expect(GuideCursorMotion.repairedCursor(empty, from: 0, anchor: 50, in: current)
+            == GuideCursor(column: 1, programID: nil, anchor: 50))
+        #expect(GuideCursorMotion.repairedCursor(empty, from: 0, anchor: 50, in: [current[0]]) == nil)
+    }
 }
