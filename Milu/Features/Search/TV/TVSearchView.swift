@@ -79,7 +79,9 @@ struct TVSearchView: View {
     @ViewBuilder
     private var content: some View {
         if model.trimmedQuery.isEmpty {
-            EmptyView()
+            // 検索語が空でも、標準の検索欄を載せる画面の領域を確保する。
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.load == .offline {
             TVOfflineView {
                 model.retry()
