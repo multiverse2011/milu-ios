@@ -175,9 +175,17 @@ struct GuideLayoutTests {
         let x = GuideLayout.tvFollowColumnOffset(
             scrollX: 0, visibleWidth: visibleWidth, column: column, previous: 0, next: nil
         )
-        let range = GuideLayout.tvColumnFocusRange(column, scrollX: x, visibleWidth: visibleWidth)
-        #expect(GuideLayout.tvColumnRange(scrollX: x, width: viewportWidth, count: column + 1).contains(column))
-        #expect(range.map { $0.upperBound - $0.lowerBound } == GuideLayout.tvColumnWidth)
+        let back = GuideLayout.tvFollowColumnOffset(
+            scrollX: x, visibleWidth: visibleWidth, column: 0, previous: nil, next: column
+        )
+        let step = GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap
+        for (destination, before, after) in [(column, 0.0, x), (0, x, back)] {
+            #expect(GuideLayout.tvColumnFocusRange(destination, scrollX: before, visibleWidth: visibleWidth) == nil)
+            let left = Double(destination) * step - after
+            let cell = left..<(left + GuideLayout.tvColumnWidth)
+            #expect(GuideLayout.tvColumnFocusRange(destination, scrollX: after, visibleWidth: visibleWidth) == cell)
+            #expect(GuideLayout.tvColumnRange(scrollX: after, width: viewportWidth, count: column + 1).contains(destination))
+        }
     }
 
     @Test func tvHorizontalFollowKeepsTheSelectedColumnAcrossAGap() {

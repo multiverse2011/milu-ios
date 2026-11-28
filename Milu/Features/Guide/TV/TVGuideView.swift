@@ -319,8 +319,12 @@ private struct TVGuideBoard: View {
 
     private func grid(size: CGSize, now: Date) -> some View {
         let rows = rowRange(size: size)
-        let gridCells = columnRange(size: size).map { column in
+        let columnsInRange = columnRange(size: size)
+        let gridCells = columnsInRange.map { column in
             (column: column, cells: cells(in: column, rows: rows))
+        }
+        let focusColumns = columnsInRange.map { column in
+            (column: column, usable: !guide.services[column].programs.isEmpty, label: cursorLabel(column: column, now: now))
         }
         let selected = resolvedCursor(now: now)
         // 上の的を経由する間は強調を保つ。詳細を閉じる間は格子に焦点が戻るまで表示しない。
@@ -329,51 +333,49 @@ private struct TVGuideBoard: View {
         let nowY = nowOffset(now: now)
         let ring = focusFrame(for: focused)
         let ruler = timeColumn(now: now, nowY: nowY)
-        return ZStack(alignment: .topLeading) {
-            GuideGridScroll(scrollY: scroll.y) { scrollY in
+        return GuideGridScroll(scroll: scroll) { position in
+            let x = GuideLayout.tvTimeWidth - position.x
+            return ZStack(alignment: .topLeading) {
                 ZStack(alignment: .topLeading) {
-                    ZStack(alignment: .topLeading) {
-                        columns(gridCells, height: size.height, nowY: nowY, focused: focused, scrollY: scrollY)
-                            .transaction { $0.animation = nil }
-                        if let ring {
-                            // 枠自身の座標と高さは、送りとは別に補間する。
-                            GuideFocusRing(rect: ring, scrollY: scrollY)
-                                .fill(Color.accentColor, style: FillStyle(eoFill: true))
-                                .allowsHitTesting(false)
-                        }
-                        if let nowY {
-                            Rectangle()
-                                .fill(Color.red)
-                                .frame(width: contentWidth, height: 2)
-                                .offset(y: nowY - scrollY)
-                                .transaction { $0.animation = nil }
-                                .allowsHitTesting(false)
-                        }
+                    columns(gridCells, height: size.height, nowY: nowY, focused: focused, scrollY: position.y)
+                        .offset(x: x)
+                        .transaction { $0.animation = nil }
+                    if let ring {
+                        // 枠自身の座標と高さは、送りとは別に補間する。
+                        GuideFocusRing(rect: ring, offset: CGPoint(x: x, y: -position.y))
+                            .fill(Color.accentColor, style: FillStyle(eoFill: true))
+                            .allowsHitTesting(false)
                     }
-                    .frame(width: contentWidth, height: totalHeight, alignment: .topLeading)
-                    .offset(x: GuideLayout.tvTimeWidth - scroll.x)
+                    if let nowY {
+                        Rectangle()
+                            .fill(Color.red)
+                            .frame(width: contentWidth, height: 2)
+                            .offset(x: x, y: nowY - position.y)
+                            .transaction { $0.animation = nil }
+                            .allowsHitTesting(false)
+                    }
                     ruler
-                        .offset(y: -scrollY)
+                        .offset(y: -position.y)
                         .transaction { $0.animation = nil }
                 }
                 .frame(width: size.width, height: size.height, alignment: .topLeading)
                 .accessibilityHidden(true)
+                focusTargets(focusColumns, size: size, now: now, scrollX: position.x)
             }
-            focusTargets(size: size, now: now)
-        }
-        .frame(width: size.width, height: size.height, alignment: .topLeading)
-        .contentShape(Rectangle())
-        .clipped()
-        .overlay(alignment: .topLeading) {
-            // 左は時刻列の中、右は格子の外側の 40 pt の余白に置く。選択列の的とは重ねない。
-            ZStack(alignment: .topLeading) {
-                columnEdgeTarget(.left, size: size)
-                columnEdgeTarget(.right, size: size)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .clipped()
+            .overlay(alignment: .topLeading) {
+                // 左は時刻列の中、右は格子の外側の余白に置く。
+                ZStack(alignment: .topLeading) {
+                    columnEdgeTarget(.left, size: size, scrollX: position.x)
+                    columnEdgeTarget(.right, size: size, scrollX: position.x)
+                }
             }
         }
     }
 
-    private func columnEdgeTarget(_ edge: ColumnEdge, size: CGSize) -> some View {
+    private func columnEdgeTarget(_ edge: ColumnEdge, size: CGSize, scrollX: Double) -> some View {
         let width = 24.0
         let timeWidth = GuideLayout.tvTimeWidth
         let visibleWidth = Double(size.width) - timeWidth
@@ -381,7 +383,7 @@ private struct TVGuideBoard: View {
             GuideCursorMotion.adjacentColumn(from: $0, in: guide.services, by: edge.step)
         }
         let needsTarget = GuideLayout.tvNeedsColumnEdgeTarget(
-            neighbor: neighbor, scrollX: scroll.x, visibleWidth: visibleWidth
+            neighbor: neighbor, scrollX: scrollX, visibleWidth: visibleWidth
         )
         return Color.clear
             .frame(width: width, height: size.height)
@@ -397,13 +399,14 @@ private struct TVGuideBoard: View {
     /// 見えず、左を押すと格子の外 (サイドバー) へ焦点が抜ける。的を列ごとに置けば格子の中で移る。
     /// Button をやめた (tvOS 26/27 では Button に focusEffectDisabled を付けても格子を囲む縁が
     /// 消えないため) ので、押せることと決定の動きはここで持つ。青枠は格子の中に自前で描く
-    private func focusTargets(size: CGSize, now: Date) -> some View {
+    private func focusTargets(
+        _ columns: [(column: Int, usable: Bool, label: String)], size: CGSize, now: Date, scrollX: Double
+    ) -> some View {
         let timeWidth = GuideLayout.tvTimeWidth
         let visibleWidth = Double(size.width) - timeWidth
         return ZStack(alignment: .topLeading) {
-            ForEach(Array(columnRange(size: size)), id: \.self) { column in
-                let usable = !guide.services[column].programs.isEmpty
-                if let range = GuideLayout.tvColumnFocusRange(column, scrollX: scroll.x, visibleWidth: visibleWidth) {
+            ForEach(columns, id: \.column) { column, usable, label in
+                if let range = GuideLayout.tvColumnFocusRange(column, scrollX: scrollX, visibleWidth: visibleWidth) {
                     Color.clear
                         .frame(width: range.upperBound - range.lowerBound, height: size.height)
                         .contentShape(Rectangle())
@@ -415,17 +418,17 @@ private struct TVGuideBoard: View {
                         .modifier(FocusTap(enabled: usable) { open(column: column, now: now) })
                         // 列は、その列で選んでいる番組を読み上げる。
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(cursorLabel(column: column, now: now))
+                        .accessibilityLabel(label)
                         .accessibilityAddTraits(.isButton)
                         .accessibilityAction { open(column: column, now: now) }
                         .accessibilityHidden(!usable)
                         .offset(x: timeWidth + range.lowerBound)
+                        // 座標は補間済みの scrollX から求めている。
+                        .transaction { $0.animation = nil }
                 }
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
-        // 的は送り先の列へ先に置き、文字や背景の横送りには追従させない。
-        .transaction { $0.animation = nil }
     }
 
     /// マス・過ぎた所の黒・いまの線・青枠。見えている範囲と前後だけを作る
@@ -631,8 +634,12 @@ private struct TVGuideBoard: View {
             focus = GuideCursorMotion.isUsable(column, in: guide.services) ? .column(column) : nil
             return
         }
-        lastColumn = next.column
-        animate(to: next, in: guide.services, focus: .column(next.column))
+        withAnimation(nil) {
+            cursor = next
+            lastColumn = next.column
+            follow(next, in: guide.services, animated: false)
+            focus = .column(next.column)
+        }
     }
 
     /// 下だけを持つ。左右は tvOS の焦点の仕組み (列または格子の端の的) が動かす。
@@ -649,13 +656,10 @@ private struct TVGuideBoard: View {
 
     /// 焦点の移動に合わせて、表と青枠を滑らかに送る。連打では前の動きを打ち切って次へ向かう
     /// (アニメーションは溜まらない)。動いている間は、連鎖中に出した送り先の範囲を列・行に作る
-    private func animate(to cursor: GuideCursor, in services: [GuideService], focus destination: Focus? = nil) {
+    private func animate(to cursor: GuideCursor, in services: [GuideService]) {
         // 何も動かない (読み直しの後始末や、同じ所へ入り直しただけ) なら動きを始めない
         let target = followTarget(cursor, in: services)
-        guard cursor != self.cursor || (target != nil && target != scroll) else {
-            if let destination { focus = destination }
-            return
-        }
+        guard cursor != self.cursor || (target != nil && target != scroll) else { return }
         if !isAnimating {
             scrollLow = scroll
             scrollHigh = scroll
@@ -666,7 +670,6 @@ private struct TVGuideBoard: View {
         withAnimation(Self.moveAnimation) {
             self.cursor = cursor
             follow(cursor, in: services, animated: true)
-            if let destination { focus = destination }
         } completion: {
             guard animationToken == token else { return }
             isAnimating = false
@@ -833,23 +836,23 @@ private struct TVGuideBoard: View {
 
 /// 送りの途中で追加されたマスも、格子のほかの要素と同じ縦位置を使う。
 private struct GuideGridScroll<Content: View>: View, Animatable {
-    var scrollY: Double
-    let content: (Double) -> Content
+    var scroll: CGPoint
+    let content: (CGPoint) -> Content
 
-    var animatableData: Double {
-        get { scrollY }
-        set { scrollY = newValue }
+    var animatableData: CGPoint.AnimatableData {
+        get { scroll.animatableData }
+        set { scroll.animatableData = newValue }
     }
 
     var body: some View {
-        content(scrollY)
+        content(scroll)
     }
 }
 
 /// 格子内の枠だけを補間し、現在の送り位置を描画時に引く。
 private nonisolated struct GuideFocusRing: Shape {
     var rect: CGRect
-    let scrollY: Double
+    let offset: CGPoint
 
     var animatableData: AnimatablePair<CGPoint.AnimatableData, CGSize.AnimatableData> {
         get { AnimatablePair(rect.origin.animatableData, rect.size.animatableData) }
@@ -860,7 +863,7 @@ private nonisolated struct GuideFocusRing: Shape {
     }
 
     func path(in bounds: CGRect) -> Path {
-        let frame = rect.offsetBy(dx: 0, dy: -scrollY)
+        let frame = rect.offsetBy(dx: offset.x, dy: offset.y)
         var path = Path(roundedRect: frame, cornerRadius: 6)
         let inside = frame.insetBy(dx: 5, dy: 5)
         if !inside.isEmpty {
