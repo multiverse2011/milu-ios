@@ -388,7 +388,7 @@ private struct TVGuideBoard: View {
         return Color.clear
             .frame(width: width, height: size.height)
             .contentShape(Rectangle())
-            .focusable(opened == nil && needsTarget)
+            .focusable(opened == nil && (needsTarget || focus == .columnEdge(edge)))
             .focusEffectDisabled()
             .focused($focus, equals: .columnEdge(edge))
             .accessibilityHidden(true)
