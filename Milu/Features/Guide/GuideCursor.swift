@@ -36,13 +36,18 @@ nonisolated enum GuideCursorMotion {
     }
 
     /// 番組のある局の指定時刻に置く。その時刻に放送がなければ番組 ID は空のまま。
+    /// 全局が空の間は、先頭列に指定時刻だけを保持する。
     static func cursor(at column: Int, anchor: Int64, in services: [GuideService]) -> GuideCursor? {
-        guard isUsable(column, in: services) else { return nil }
+        guard isUsable(column, in: services) else {
+            guard let first = services.indices.first, services.allSatisfy({ $0.programs.isEmpty }) else { return nil }
+            return GuideCursor(column: first, programID: nil, anchor: anchor)
+        }
         let program = services[column].programs.first { $0.startAt <= anchor && anchor < $0.endAt }
         return GuideCursor(column: column, programID: program?.id, anchor: anchor)
     }
 
     /// 同じ局・番組を優先する。番組自体が外れたら、残るマスの中に基準時刻を置く。
+    /// 近い列に移った後は基準時刻の番組を選び、その時刻に番組がなければ空のままにする。
     static func cursorAfterRefresh(
         _ cursor: GuideCursor, previous: [GuideService], current: [GuideService], range: Range<Int64>, hasResponse: Bool = true
     ) -> GuideCursor? {
@@ -156,6 +161,7 @@ nonisolated enum GuideCursorMotion {
     }
 
     /// 読み直しで番組が消えたら、残った番組とその中の基準時刻に置き直す。
+    /// 近い列に移った後は基準時刻の番組を選び、その時刻に番組がなければ空のままにする。
     static func repairedCursor(
         _ cursor: GuideCursor?, from column: Int, anchor: Int64, in services: [GuideService]
     ) -> GuideCursor? {
