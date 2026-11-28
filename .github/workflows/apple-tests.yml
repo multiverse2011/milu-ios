@@ -1,4 +1,4 @@
-name: Apple プラットフォームの単体テスト
+name: apple-tests
 
 on:
   pull_request:
@@ -14,22 +14,22 @@ concurrency:
 
 jobs:
   ios-tests:
-    name: iOS の単体テスト
+    name: ios-tests
     runs-on: xcode-27
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Xcode 27.2 を選ぶ
+      - name: Select Xcode 27.2
         run: |
           sudo xcode-select --switch /Applications/Xcode_27.2.app
           xcodebuild -version
       # xcodegen は mise.toml で手元と同じ版に固定する
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-      - name: Xcode プロジェクトを生成する
+      - name: Generate Xcode project
         run: xcodegen generate
-      - name: iPhone 17 で単体テストを実行する
+      - name: Run unit tests on iPhone 17
         env:
           TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
         run: |
@@ -42,7 +42,7 @@ jobs:
             -enableCodeCoverage YES \
             CODE_SIGN_IDENTITY=-
       # iPhone のシミュレータは PiP を使えず、PiP のテストが飛ばされるので、iPad で走らせる
-      - name: iPad で PiP の単体テストを実行する
+      - name: Run PiP tests on iPad
         run: |
           xcodebuild test -project Milu.xcodeproj -scheme Milu \
             -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)' \
@@ -50,19 +50,19 @@ jobs:
             -resultBundlePath DerivedData/results/Milu-iPad-PiP.xcresult \
             -only-testing:MiluTests/PictureInPictureTests \
             CODE_SIGN_IDENTITY=-
-      - name: カバレッジを Job Summary に書く
+      - name: Write coverage to job summary
         if: success() || failure()
         run: |
           [ -d DerivedData/results/Milu-iOS.xcresult ] || exit 0
           python3 -I scripts/coverage-summary.py DerivedData/results/Milu-iOS.xcresult >> "$GITHUB_STEP_SUMMARY"
       # UI テスト (App Store のスクリーンショット) は CI で走らせないので、壊れていないかをビルドだけで確かめる
-      - name: UI テストをビルドする
+      - name: Build UI tests
         run: |
           xcodebuild build-for-testing -project Milu.xcodeproj -scheme MiluScreenshots \
             -destination 'platform=iOS Simulator,name=iPhone 17' \
             -derivedDataPath DerivedData/ios \
             CODE_SIGN_IDENTITY=-
-      - name: 失敗・中断時のテスト結果を保存する
+      - name: Upload test results on failure
         if: failure() || cancelled()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -72,23 +72,23 @@ jobs:
           retention-days: 3
 
   tvos-tests:
-    name: tvOS の単体テスト
+    name: tvos-tests
     runs-on: xcode-27
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Xcode 27.2 を選ぶ
+      - name: Select Xcode 27.2
         run: |
           sudo xcode-select --switch /Applications/Xcode_27.2.app
           xcodebuild -version
           xcrun simctl list runtimes
       # xcodegen は mise.toml で手元と同じ版に固定する
       - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-      - name: Xcode プロジェクトを生成する
+      - name: Generate Xcode project
         run: xcodegen generate
-      - name: Apple TV 4K で単体テストを実行する
+      - name: Run unit tests on Apple TV 4K
         env:
           TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
         run: |
@@ -98,7 +98,7 @@ jobs:
             -derivedDataPath DerivedData/tvos \
             -resultBundlePath DerivedData/results/Milu-tvOS.xcresult \
             CODE_SIGN_IDENTITY=-
-      - name: 失敗・中断時のテスト結果を保存する
+      - name: Upload test results on failure
         if: failure() || cancelled()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:

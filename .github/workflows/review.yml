@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
       # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB は bubblewrap で Bash の子プロセスから鍵を消す。runner のイメージの更新などで
       # bwrap が動かなくなったまま黙ってレビューを続けないよう、ここで止める
-      - name: bubblewrap が動くことを確かめる
+      - name: Check bubblewrap works
         run: bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all --die-with-parent true
       # Claude Code を LiteLLM 経由で Kimi Code へ向けて動かす (鍵は LiteLLM が持ち、ここには仮想キーだけ)
       - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
