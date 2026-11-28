@@ -13,7 +13,7 @@ struct TVLivePlayerView: View {
     @Environment(AppModel.self) private var app
     @State private var overlay: Overlay = .none
     /// メニューを開いたときのフォーカスの的 (上は局の列、下は操作の列)
-    @State private var menuTarget: TVLiveFocus = .quality(0)
+    @State private var menuTarget: TVLiveFocus = .quality
     @State private var showsHud = false
     /// 長押しの決定を消費したか (番組情報が無く詳細を開けなかった局で、離した決定を一時停止に使わない)
     @State private var longPressConsumed = false
@@ -150,7 +150,7 @@ struct TVLivePlayerView: View {
             case .left: step(-1)
             case .right: step(1)
             case .up: openMenu(focus: .station(model.current?.id ?? 0))
-            case .down: openMenu(focus: .quality(0))
+            case .down: openMenu(focus: .quality)
             default: break
             }
         }

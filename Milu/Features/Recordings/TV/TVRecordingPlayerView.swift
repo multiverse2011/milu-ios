@@ -3,7 +3,7 @@ import SwiftUI
 /// tvOS の録画・追っかけの再生 (TV-Player・TV-Chase・TV-PlayerEnd)。
 /// リモコンの割り当ては design.md 3.5.1: 左右で 10 秒戻す/送る、下でシークバーと操作の列、
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
-/// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
+/// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻ると自動で隠す。Menu ではすぐ隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
 /// 字幕の持ち上げ量は操作の列の上端と映像面の実寸から決めるので、題と操作の列の字は
 /// テキストスタイルのまま拡大してよい。題だけは放送の字なので .title2 に揃える (旧 44pt)。
@@ -29,8 +29,10 @@ struct TVRecordingPlayerView: View {
     @FocusState private var surfaceFocused: Bool
     @FocusState private var control: Control?
 
+    /// 操作の列のフォーカスの的。選択肢が多いものは項目ごとの 1 つのメニュー、
+    /// オン/オフだけのものは切り替えボタンに当てる
     private enum Control: Hashable {
-        case playPause, nextChapter, latest, speed, quality, rung, captions, cmSkip, audio
+        case playPause, nextChapter, latest, speed, quality, captions, cmSkip, audio
     }
 
     var body: some View {
@@ -78,10 +80,11 @@ struct TVRecordingPlayerView: View {
             focusTask?.cancel()
             Task { await session.close() }
         }
-        // 札から映像の面へ戻ったら、再生中は操作の列を隠す (詳細の sheet を閉じたときも同じ)
+        // メニューを閉じると焦点が映像の面へ戻ることがあるので、列は 4 秒後に隠す。
+        // 詳細の sheet を閉じたときは onDismiss ですぐ隠す。
         .onChange(of: surfaceFocused) { _, focused in
             guard focused, showsControls, session.isPlaying else { return }
-            hideControls()
+            scheduleHide()
         }
         // 一時停止したら操作の列を出したままにする (再生が始まったらまた隠してよい)
         .onChange(of: session.isPlaying) { _, playing in
@@ -91,7 +94,7 @@ struct TVRecordingPlayerView: View {
                 showControls()
             }
         }
-        .sheet(isPresented: $showDetail) {
+        .sheet(isPresented: $showDetail, onDismiss: detailDismissed) {
             TVRecordingDetailView(
                 recording: session.recording,
                 resumeMs: detailResumeMs,
@@ -332,7 +335,9 @@ struct TVRecordingPlayerView: View {
     }
 
     private var pillRow: some View {
-        HStack(spacing: 16) {
+        // ボタンが 7 個並ぶ場合に備え、間を 12 に詰める。
+        HStack(spacing: 12) {
+            // 動かす (選ばない) ものはボタンのまま
             pill(session.isPlaying ? "一時停止" : "再生", tag: .playPause) {
                 session.togglePlayCommand()
             }
@@ -349,58 +354,147 @@ struct TVRecordingPlayerView: View {
                 }
             }
 
-            pill(LocalizedStringKey(RecordingRules.speedName(session.speed)), tag: .speed) {
-                session.setSpeed(RecordingRules.nextSpeed(after: session.speed))
-            }
-
-            if session.qualityItems.count > 1 {
-                pill(qualityTitle, tag: .quality) {
-                    session.selectQuality(
-                        RecordingRules.nextQualityItem(items: session.qualityItems, selected: session.selectedQuality)?.codec
-                    )
-                }
-            }
-
-            if !session.rungItems.isEmpty {
-                pill("解像度 \(rungTitle)", tag: .rung) {
-                    let items = session.rungItems
-                    // 押すまでに音声だけの応答で欄が消えていたら何もしない
-                    guard !items.isEmpty else { return }
-                    let index = items.firstIndex { $0.rung == session.selectedRung } ?? 0
-                    session.selectRung(items[(index + 1) % items.count].rung)
-                }
-            }
-
-            if session.hasCaptions {
-                pill(captionsTitle, tag: .captions) {
-                    session.setCaptionsOn(!session.captionsOn)
-                }
-            }
-
-            if !session.isChase {
-                pill(cmSkipTitle, tag: .cmSkip) {
-                    session.setCmSkip(!session.cmSkipEnabled)
-                }
-            }
-
-            if session.audioTracks.count > 1 {
-                pill(audioTitle, tag: .audio) {
-                    if let next = RecordingRules.nextAudioChoice(
-                        tracks: session.audioTracks,
-                        selected: session.selectedAudio
-                    ) {
-                        session.selectAudio(next)
-                    }
-                }
-            }
+            // 選択肢が多いものは項目ごとのメニュー、オン/オフだけのものは切り替えボタン
+            speedMenu
+            qualityMenu
+            captionsButton
+            cmSkipButton
+            audioMenu
         }
         .controlSize(.large)
         .focusSection()
     }
 
-    /// 操作の札。外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 字幕・CM 飛ばしの入り切りは札の字 (オン・オフ) で示す。
-    /// フォーカス中の bordered も地が tint になるので、選択を地の色だけで表さない
+    /// 速度のメニュー
+    private var speedMenu: some View {
+        let value = RecordingRules.speedName(session.speed)
+        return Menu {
+            ForEach(RecordingRules.speeds, id: \.self) { speed in
+                TVMenuOption(title: RecordingRules.speedName(speed), selected: speed == session.speed) {
+                    session.setSpeed(speed)
+                }
+            }
+        } label: {
+            TVControlLabel(name: "速度", value: value)
+        }
+        .buttonStyle(.bordered)
+        .focused($control, equals: .speed)
+        .accessibilityLabel(Text("速度"))
+        .accessibilityValue(Text(value))
+    }
+
+    /// 画質と解像度のメニュー。どちらも映像の質の選びなので 1 つのボタンにまとめる
+    @ViewBuilder
+    private var qualityMenu: some View {
+        let showsQuality = session.qualityItems.count > 1
+        let showsRung = !session.rungItems.isEmpty
+        if showsQuality || showsRung {
+            let name: LocalizedStringKey = showsQuality ? "画質" : "解像度"
+            let quality = TVLiveText.quality(selected: session.selectedQuality, current: session.currentCodec)
+            let rungSuffix = session.selectedRung != 0 && !rungTitle.isEmpty ? "・\(rungTitle)" : ""
+            let value = showsQuality ? quality + rungSuffix : rungTitle
+            Menu {
+                if showsQuality {
+                    Section("画質") {
+                        ForEach(Array(session.qualityItems.enumerated()), id: \.offset) { _, item in
+                            TVMenuOption(
+                                title: qualityOptionTitle(item),
+                                selected: item.codec == session.selectedQuality
+                            ) {
+                                session.selectQuality(item.codec)
+                            }
+                        }
+                    }
+                }
+                if showsRung {
+                    Section("解像度") {
+                        ForEach(session.rungItems, id: \.rung) { item in
+                            TVMenuOption(title: item.title, selected: item.rung == session.selectedRung) {
+                                session.selectRung(item.rung)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                TVControlLabel(name: name, value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($control, equals: .quality)
+            .accessibilityLabel(Text(name))
+            .accessibilityValue(Text(value))
+        }
+    }
+
+    /// 画質のメニューの行。「自動」にはライブと同じく、いまの形式を添える
+    private func qualityOptionTitle(_ item: PlaybackRules.QualityItem) -> String {
+        item.codec == nil
+            ? TVLiveText.quality(selected: nil, current: session.currentCodec)
+            : item.title
+    }
+
+    /// 字幕のボタン。オン/オフの 2 択だけなのでメニューにせず、押すたびに切り替える。
+    /// 形とスタイルは状態で変えない (押した直後に焦点が隣のボタンへ移るため)
+    @ViewBuilder
+    private var captionsButton: some View {
+        if session.hasCaptions {
+            let on = session.captionsOn
+            let value = on ? String(localized: "オン") : String(localized: "オフ")
+            Button {
+                session.setCaptionsOn(!on)
+            } label: {
+                TVControlLabel(name: "字幕", value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($control, equals: .captions)
+            .accessibilityLabel(Text("字幕"))
+            .accessibilityValue(Text(value))
+        }
+    }
+
+    /// CM 飛ばしのボタン。字幕と同じく入り切りだけなので、押すたびに切り替える
+    @ViewBuilder
+    private var cmSkipButton: some View {
+        if !session.isChase {
+            let on = session.cmSkipEnabled
+            let value = on ? String(localized: "オン") : String(localized: "オフ")
+            Button {
+                session.setCmSkip(!on)
+            } label: {
+                TVControlLabel(name: "CM 飛ばし", value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($control, equals: .cmSkip)
+            .accessibilityLabel(Text("CM 飛ばし"))
+            .accessibilityValue(Text(value))
+        }
+    }
+
+    /// 音声のメニュー (選べるものが 2 つ以上あるとき)
+    @ViewBuilder
+    private var audioMenu: some View {
+        let tracks = session.audioTracks
+        if tracks.count > 1 {
+            let value = tvAudioValue(session.selectedAudio?.label)
+            Menu {
+                ForEach(tracks, id: \.id) { track in
+                    TVMenuOption(
+                        title: track.label.isEmpty ? String(localized: "音声") : track.label,
+                        selected: track.id == session.selectedAudio?.id
+                    ) {
+                        session.selectAudio(track)
+                    }
+                }
+            } label: {
+                TVControlLabel(name: "音声", value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($control, equals: .audio)
+            .accessibilityLabel(Text("音声"))
+            .accessibilityValue(Text(value ?? ""))
+        }
+    }
+
+    /// 操作のボタン (選ばずに動かすもの)。外観・フォーカスは tvOS の標準の ButtonStyle に任せる
     private func pill(
         _ title: LocalizedStringKey,
         tag: Control,
@@ -411,30 +505,9 @@ struct TVRecordingPlayerView: View {
             .focused($control, equals: tag)
     }
 
-    private var captionsTitle: LocalizedStringKey {
-        session.captionsOn ? "字幕 オン" : "字幕 オフ"
-    }
-
-    private var cmSkipTitle: LocalizedStringKey {
-        session.cmSkipEnabled ? "CM 飛ばし オン" : "CM 飛ばし オフ"
-    }
-
-    private var qualityTitle: LocalizedStringKey {
-        if let selected = session.selectedQuality {
-            return LocalizedStringKey(PlaybackRules.codecName(selected))
-        }
-        let current = session.currentCodec.map { PlaybackRules.codecName($0) } ?? ""
-        return current.isEmpty ? "自動" : "自動 (\(current))"
-    }
-
     /// 段 0 は「元のまま」、ほかは「720p」
     private var rungTitle: String {
         session.rungItems.first { $0.rung == session.selectedRung }?.title ?? ""
-    }
-
-    private var audioTitle: LocalizedStringKey {
-        if let label = session.selectedAudio?.label { return LocalizedStringKey(label) }
-        return "音声"
     }
 
     // MARK: - 操作の列の出し入れ
@@ -466,7 +539,9 @@ struct TVRecordingPlayerView: View {
         guard session.isPlaying else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled, control == nil, session.isPlaying else { return }
+            // メニューを開いている間は焦点が映像の面にも札にも無い。ここで隠すと
+            // 開いているメニューごと消えるので、映像の面へ戻っているときだけ隠す
+            guard !Task.isCancelled, control == nil, surfaceFocused, session.isPlaying else { return }
             controlsVisible = false
         }
     }
@@ -579,6 +654,13 @@ struct TVRecordingPlayerView: View {
         let start = Date(timeIntervalSince1970: Double(session.recording.startAt) / 1000)
         let end = Date(timeIntervalSince1970: Double(session.recording.endAt) / 1000)
         return Wording.timeRange(from: start, to: end, separator: .recording)
+    }
+
+    /// 詳細 (sheet) を閉じたとき。再生中で列が出ていれば、以前と同じくすぐ隠す。
+    /// メニューの閉じ際は sheet ではないので、こちらとは区別できる
+    private func detailDismissed() {
+        guard showsControls, session.isPlaying else { return }
+        hideControls()
     }
 
     /// 長押しで詳細を開く。続きから再生の位置は開いた瞬間の値で止める

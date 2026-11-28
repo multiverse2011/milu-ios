@@ -2321,6 +2321,16 @@
         }
       }
     },
+    "速度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speed"
+          }
+        }
+      }
+    },
     "番組内容 (見出し)" : {
       "localizations" : {
         "en" : {
@@ -3123,66 +3133,12 @@
         }
       }
     },
-    "字幕 オン" : {
+    "CM 飛ばし" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Subtitles On"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "字幕 オン"
-          }
-        }
-      }
-    },
-    "字幕 オフ" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subtitles Off"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "字幕 オフ"
-          }
-        }
-      }
-    },
-    "CM 飛ばし オン" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skip Ads On"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CM 飛ばし オン"
-          }
-        }
-      }
-    },
-    "CM 飛ばし オフ" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skip Ads Off"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CM 飛ばし オフ"
+            "value" : "Skip Ads"
           }
         }
       }

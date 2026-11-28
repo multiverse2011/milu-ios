@@ -74,84 +74,120 @@ struct TVLiveMenuView: View {
     private var controls: some View {
         let session = model.session
         return HStack(spacing: 18) {
-            Text("画質")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            ForEach(Array((session?.qualityItems ?? []).enumerated()), id: \.offset) { index, item in
-                chip(
-                    TVLiveText.qualityItemTitle(item, session: session),
-                    selected: item.codec == session?.selectedQuality,
-                    focus: .quality(index)
-                ) {
-                    model.selectQuality(item.codec)
-                }
-            }
-            if session?.rungItems.isEmpty == false {
-                Text("解像度")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            ForEach(session?.rungItems ?? [], id: \.rung) { item in
-                chip(
-                    item.title,
-                    selected: item.rung == session?.selectedRung,
-                    focus: .rung(item.rung)
-                ) {
-                    model.selectRung(item.rung)
-                }
-            }
-            if session?.hasCaptions == true {
-                chip(
-                    session?.captionsOn == true ? String(localized: "字幕 オン") : String(localized: "字幕 オフ"),
-                    selected: session?.captionsOn == true,
-                    focus: .captions
-                ) {
-                    model.setCaptionsOn(!(session?.captionsOn ?? false))
-                }
-            }
-            // 音声は選べるものを並べる (画面案 TV-Live の「主音声」)
-            ForEach(session?.audioTracks ?? [], id: \.id) { track in
-                chip(
-                    track.label,
-                    selected: track.id == session?.selectedAudio?.id,
-                    focus: .audio(track.id)
-                ) {
-                    model.selectAudio(track)
-                }
-            }
+            // 選択肢が多いもの (画質・解像度・音声) は項目ごとに 1 つのメニュー、
+            // オン/オフだけの字幕は押すたびに切り替わるボタンにする。録画は動かすボタン
+            qualityMenu(session)
+            captionsButton(session)
+            audioMenu(session)
             if let now = model.current?.now {
                 let recording = now.reserved || now.recording
-                chip(
-                    recording ? String(localized: "● 録画中") : String(localized: "● 録画"),
-                    selected: recording,
-                    recording: recording,
-                    focus: .record
-                ) {
+                Button(recording ? String(localized: "● 録画中") : String(localized: "● 録画")) {
                     model.toggleRecord()
                 }
+                .buttonStyle(.bordered)
+                .focused($focus, equals: .record)
+                .accessibilityAddTraits(recording ? .isSelected : [])
             }
         }
         .controlSize(.large)
         .focusSection()
     }
 
-    /// 操作の列の 1 つ。選択中・録画中は字 (✓・● 録画中) で示す。
-    /// tint は付けず、フォーカスの地と字は tvOS 標準の白地・黒字に任せる
-    /// (tint はフォーカス時の地と字の両方に効き、白地に白字になりうる)。
-    /// 札の形を状態で切り替えると、押した直後にフォーカスが隣の札へ移るため、
-    /// スタイルは bordered の 1 つに固定する (#75)
-    private func chip(
-        _ title: String,
-        selected: Bool,
-        recording: Bool = false,
-        focus value: TVLiveFocus,
-        action: @escaping () -> Void
-    ) -> some View {
-        let marked = selected && !recording ? "✓ \(title)" : title
-        return Button(marked, action: action)
+    /// 画質と解像度のメニュー。どちらも映像の質の選びなので 1 つのボタンにまとめる。
+    /// ボタンには項目名と今の値を出す (音声だけの観方では解像度が無いので出さない)
+    @ViewBuilder
+    private func qualityMenu(_ session: PlaybackSession?) -> some View {
+        let qualityItems = session?.qualityItems ?? []
+        let rungItems = session?.rungItems ?? []
+        if !qualityItems.isEmpty || !rungItems.isEmpty {
+            let showsQuality = !qualityItems.isEmpty
+            let name: LocalizedStringKey = showsQuality ? "画質" : "解像度"
+            let value = showsQuality
+                ? qualityValue(session)
+                : rungItems.first { $0.rung == session?.selectedRung }?.title ?? ""
+            Menu {
+                if !qualityItems.isEmpty {
+                    Section("画質") {
+                        ForEach(Array(qualityItems.enumerated()), id: \.offset) { _, item in
+                            TVMenuOption(
+                                title: TVLiveText.qualityItemTitle(item, session: session),
+                                selected: item.codec == session?.selectedQuality
+                            ) {
+                                model.selectQuality(item.codec)
+                            }
+                        }
+                    }
+                }
+                if !rungItems.isEmpty {
+                    Section("解像度") {
+                        ForEach(rungItems, id: \.rung) { item in
+                            TVMenuOption(title: item.title, selected: item.rung == session?.selectedRung) {
+                                model.selectRung(item.rung)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                TVControlLabel(name: name, value: value)
+            }
             .buttonStyle(.bordered)
-            .focused($focus, equals: value)
-            .accessibilityAddTraits(selected ? .isSelected : [])
+            .focused($focus, equals: .quality)
+            .accessibilityLabel(Text(name))
+            .accessibilityValue(Text(value))
+        }
+    }
+
+    /// 画質の値。解像度を選んでいるときは添える (「自動 (H.264)・540p」)
+    private func qualityValue(_ session: PlaybackSession?) -> String {
+        let quality = TVLiveText.quality(session)
+        guard let session, session.selectedRung != 0,
+              let rung = session.rungItems.first(where: { $0.rung == session.selectedRung })?.title
+        else { return quality }
+        return "\(quality)・\(rung)"
+    }
+
+    /// 字幕のボタン。オン/オフの 2 択だけなのでメニューにせず、押すたびに切り替える。
+    /// 形とスタイルは状態で変えない (押した直後に焦点が隣のボタンへ移るため)
+    @ViewBuilder
+    private func captionsButton(_ session: PlaybackSession?) -> some View {
+        if session?.hasCaptions == true {
+            let on = session?.captionsOn == true
+            let value = on ? String(localized: "オン") : String(localized: "オフ")
+            Button {
+                model.setCaptionsOn(!on)
+            } label: {
+                TVControlLabel(name: "字幕", value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($focus, equals: .captions)
+            .accessibilityLabel(Text("字幕"))
+            .accessibilityValue(Text(value))
+        }
+    }
+
+    /// 音声のメニュー。選べるものを全部並べ、いまのものにチェックを付ける
+    @ViewBuilder
+    private func audioMenu(_ session: PlaybackSession?) -> some View {
+        let tracks = session?.audioTracks ?? []
+        if !tracks.isEmpty {
+            let value = tvAudioValue(session?.selectedAudio?.label)
+            Menu {
+                ForEach(tracks, id: \.id) { track in
+                    TVMenuOption(
+                        title: track.label.isEmpty ? String(localized: "音声") : track.label,
+                        selected: track.id == session?.selectedAudio?.id
+                    ) {
+                        model.selectAudio(track)
+                    }
+                }
+            } label: {
+                TVControlLabel(name: "音声", value: value)
+            }
+            .buttonStyle(.bordered)
+            .focused($focus, equals: .audio)
+            .accessibilityLabel(Text("音声"))
+            .accessibilityValue(Text(value ?? ""))
+        }
     }
 
     // MARK: - 種別ごとの局の列

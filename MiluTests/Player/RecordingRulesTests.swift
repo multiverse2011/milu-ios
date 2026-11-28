@@ -61,41 +61,6 @@ import Testing
         #expect(RecordingRules.detailResumeMs(override: nil, saved: nil) == nil)
     }
 
-    @Test func nextSpeedCycles() {
-        #expect(RecordingRules.nextSpeed(after: 1) == 1.25)
-        #expect(RecordingRules.nextSpeed(after: 1.25) == 1.5)
-        #expect(RecordingRules.nextSpeed(after: 1.5) == 2)
-        #expect(RecordingRules.nextSpeed(after: 2) == 1)
-        // 並びに無い値からは先頭へ
-        #expect(RecordingRules.nextSpeed(after: 3) == 1)
-    }
-
-    @Test func nextQualityItemCyclesThroughAutoAndCodecs() {
-        let items = [
-            PlaybackRules.QualityItem(codec: nil, title: "自動"),
-            PlaybackRules.QualityItem(codec: .av1, title: "AV1"),
-            PlaybackRules.QualityItem(codec: .hevc, title: "H.265"),
-            PlaybackRules.QualityItem(codec: .h264, title: "H.264"),
-        ]
-        #expect(RecordingRules.nextQualityItem(items: items, selected: nil)?.codec == .av1)
-        #expect(RecordingRules.nextQualityItem(items: items, selected: .av1)?.codec == .hevc)
-        #expect(RecordingRules.nextQualityItem(items: items, selected: .hevc)?.codec == .h264)
-        #expect(RecordingRules.nextQualityItem(items: items, selected: .h264)?.codec == nil)
-        #expect(RecordingRules.nextQualityItem(items: [], selected: nil) == nil)
-    }
-
-    @Test func nextAudioCycles() {
-        let tracks = [
-            RecordingRules.AudioChoice(PlaybackAudio(id: "0", label: "主音声")),
-            RecordingRules.AudioChoice(PlaybackAudio(id: "1", label: "副音声")),
-        ]
-        #expect(RecordingRules.nextAudioChoice(tracks: tracks, selected: tracks[0])?.id == "1")
-        #expect(RecordingRules.nextAudioChoice(tracks: tracks, selected: tracks[1])?.id == "0")
-        // まだ選ばれていなければ先頭
-        #expect(RecordingRules.nextAudioChoice(tracks: tracks, selected: nil)?.id == "0")
-        #expect(RecordingRules.nextAudioChoice(tracks: [], selected: nil) == nil)
-    }
-
     @Test func finishedAtTheEnd() {
         #expect(RecordingRules.isFinished(position: 1790, duration: 1790))
         #expect(RecordingRules.isFinished(position: 1789.8, duration: 1790))

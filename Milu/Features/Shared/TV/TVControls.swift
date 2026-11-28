@@ -13,3 +13,47 @@ struct TVChannelLogo: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
+
+/// 操作の列のボタンの字 (項目名と今の値)。値が空なら項目名だけを出す
+/// (音声の名前が空のときに「音声 音声」と重ねない)。
+struct TVControlLabel: View {
+    let name: LocalizedStringKey
+    let value: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(name)
+            if let value, !value.isEmpty {
+                Text(value)
+            }
+        }
+        .lineLimit(1)
+    }
+}
+
+/// 音声のラベルの受け皿。空なら nil にして、ボタンに値を出さない
+func tvAudioValue(_ label: String?) -> String? {
+    guard let label, !label.isEmpty else { return nil }
+    return label
+}
+
+/// tvOS の標準のメニューの中の 1 行。選んでいるものにチェックを付け、読み上げにも選択を伝える。
+/// 札 (pill) のように押すたびに値を回すのではなく、全部の値を並べて 1 つを選ばせる。
+struct TVMenuOption: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if selected {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        // チェックの絵 (「チェックマーク」) を読ませず、行の題だけを読む。選択は isSelected で伝わる
+        .accessibilityLabel(Text(title))
+    }
+}
