@@ -139,16 +139,18 @@ nonisolated enum GuideLayout {
     }
 
     /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
-    /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、時刻を優先する。
+    /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、見出しを優先する。
     static func tvFollowOffset(
         scrollY: Double, viewportHeight: Double, anchorY: Double, cell: ClosedRange<Double>?, headingHeight: Double
     ) -> Double {
         let margin = min(40, viewportHeight / 2)
         let y = min(max(scrollY, anchorY - viewportHeight + margin), anchorY - margin)
         guard let cell, headingHeight > 0, headingHeight <= viewportHeight else { return y }
-        let lower = max(anchorY, cell.lowerBound + headingHeight) - viewportHeight
-        let upper = min(anchorY, cell.upperBound - headingHeight)
-        guard lower <= upper else { return y }
+        let headingLower = cell.lowerBound + headingHeight - viewportHeight
+        let headingUpper = cell.upperBound - headingHeight
+        let lower = max(anchorY - viewportHeight, headingLower)
+        let upper = min(anchorY, headingUpper)
+        guard lower <= upper else { return min(max(y, headingLower), headingUpper) }
         return min(max(y, lower), upper)
     }
 
