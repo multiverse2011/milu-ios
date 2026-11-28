@@ -58,7 +58,7 @@ final class GuideModel: ProgramSheetModel {
     private(set) var tvGuide: GuideResponse?
     private(set) var tvDidFail = false
     /// 採用済みの種別の日別応答。起点の日の応答が全体の until を決める。
-    private var tvResponses: [Date: GuideResponse] = [:]
+    private var tvResponses: [Date: TVDayResponse] = [:]
     /// 現在の世代の応答だけを採用する。
     private var tvGeneration = 0
     /// 一括取得は最大 1 つ。新しい世代を始めると前の取得を取り消す。
@@ -71,7 +71,20 @@ final class GuideModel: ProgramSheetModel {
     private var tvRequestedType: ServiceType?
     /// 現在の世代の日別取得状況。追加の再試行は同時に 1 日だけ。
     private var tvDayLoads: [Date: TVDayLoad] = [:]
+    /// 起点日が確定するまでは、後続日にどの日が含まれるか決まらない。
+    private var tvIsLoadingBase = false
+    private var tvRecordingWaiters: [UUID: TVRecordingWaiter] = [:]
     private var isTVGuide = false
+
+    private struct TVDayResponse {
+        let response: GuideResponse
+        let generation: Int
+    }
+
+    private struct TVRecordingWaiter {
+        let days: ClosedRange<Date>
+        let continuation: AsyncStream<Void>.Continuation
+    }
 
     private enum TVDayLoad {
         case loading, retrying, retried
@@ -110,14 +123,18 @@ final class GuideModel: ProgramSheetModel {
         }
     }
 
-    /// 読み直し。tvOS は全日を読む。予約操作は起点の日の読了までを待つ。
-    func refresh(now: Date = Date(), waitForRemainingDays: Bool = true) async {
+    /// 読み直し。tvOS は全日を読む。
+    func refresh(now: Date = Date()) async {
         if isTVGuide {
-            let today = GuideLayout.broadcastDay(for: now)
-            await loadTVGuide(base: tvRequestedType == nil ? tvBase ?? today : today, waitForRemainingDays: waitForRemainingDays)
+            await loadTVGuide(base: tvRefreshBase(now: now))
         } else {
             await reload()
         }
+    }
+
+    private func tvRefreshBase(now: Date) -> Date {
+        let today = GuideLayout.broadcastDay(for: now)
+        return tvRequestedType == nil ? tvBase ?? today : today
     }
 
     /// 日付のメニューに並べる日。今日から 8 日ぶんで、until より先は並べない (3.5)
@@ -132,7 +149,7 @@ final class GuideModel: ProgramSheetModel {
 
     /// 起点の日の応答から決めた全日。取得中・失敗の日も同じ座標とチップを持つ。
     var tvDays: [Date] {
-        guard let tvBase, let today = tvResponses[tvBase] else { return [] }
+        guard let tvBase, let today = tvResponses[tvBase]?.response else { return [] }
         return GuideLayout.menuDays(now: Date(timeIntervalSince1970: Double(tvFrom) / 1000), until: today.until)
     }
 
@@ -208,21 +225,31 @@ final class GuideModel: ProgramSheetModel {
         await loadTVGuide(base: GuideLayout.broadcastDay(for: now))
     }
 
-    private func loadTVGuide(base: Date, waitForRemainingDays: Bool = true) async {
+    private func loadTVGuide(base: Date) async {
+        let task = startTVGuideLoad(base: base)
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func startTVGuideLoad(base: Date) -> Task<Void, Never> {
         tvGeneration += 1
         let generation = tvGeneration
         tvLoadTask?.cancel()
         tvRetryTask?.cancel()
         tvPendingRetry = nil
         tvDayLoads = Dictionary(uniqueKeysWithValues: tvDays.map { ($0, .loading) })
-        let baseRead = waitForRemainingDays ? nil : AsyncStream<Void>.makeStream()
+        tvIsLoadingBase = true
         let task = Task {
             defer {
-                baseRead?.continuation.finish()
                 if generation == tvGeneration {
                     tvLoadTask = nil
                     tvRequestedType = nil
+                    tvIsLoadingBase = false
                     tvDayLoads = tvDayLoads.filter { $0.value != .loading }
+                    finishTVRecordingWaiters()
                 }
             }
             do {
@@ -240,7 +267,7 @@ final class GuideModel: ProgramSheetModel {
             if let today {
                 if !sameGuide { tvResponses.removeAll() }
                 tvBase = base
-                tvResponses[base] = today
+                tvResponses[base] = TVDayResponse(response: today, generation: generation)
                 let days = Set(tvDays)
                 tvResponses = tvResponses.filter { $0.key == base || days.contains($0.key) }
                 selectedType = type
@@ -252,24 +279,16 @@ final class GuideModel: ProgramSheetModel {
             }
 
             tvRequestedType = nil
-            // 起点の日の結果を反映してから待ち手を解放し、同じ世代で残りを読む。
-            baseRead?.continuation.finish()
             await loadTVRemainingDays(tvDays.filter { $0 != base }, type: type, generation: generation)
         }
         tvLoadTask = task
-        await withTaskCancellationHandler {
-            if let baseRead {
-                for await _ in baseRead.stream {}
-            } else {
-                await task.value
-            }
-        } onCancel: {
-            task.cancel()
-        }
+        return task
     }
 
     private func loadTVRemainingDays(_ days: [Date], type: ServiceType, generation: Int) async {
         tvDayLoads = Dictionary(uniqueKeysWithValues: days.map { ($0, .loading) })
+        tvIsLoadingBase = false
+        finishTVRecordingWaiters()
         let app = self.app
         var remaining = days.makeIterator()
         await withTaskGroup(of: (Date, GuideResponse?).self) { group in
@@ -284,10 +303,11 @@ final class GuideModel: ProgramSheetModel {
                 }
                 tvDayLoads[day] = nil
                 // 一時的に読めなかった日は、同じ種別の取得済みの応答を残す。
-                if let response, tvResponses[day] != response {
-                    tvResponses[day] = response
+                if let response {
+                    tvResponses[day] = TVDayResponse(response: response, generation: generation)
                     publishTVGuide()
                 }
+                finishTVRecordingWaiters()
                 if let day = remaining.next() {
                     group.addTask { (day, await Self.readTVDay(day, type: type, app: app)) }
                 }
@@ -332,7 +352,7 @@ final class GuideModel: ProgramSheetModel {
             guard generation == tvGeneration else { return }
             tvDayLoads[day] = .retried
             if let response {
-                tvResponses[day] = response
+                tvResponses[day] = TVDayResponse(response: response, generation: generation)
                 publishTVGuide()
             }
         }
@@ -360,10 +380,11 @@ final class GuideModel: ProgramSheetModel {
     private func publishTVGuide() {
         let loadedDays = tvDays.filter { tvResponses[$0] != nil }
         let services = Self.merge(loadedDays.compactMap { tvResponses[$0] })
-        tvGuide = GuideResponse(
-            type: selectedType, from: tvFrom, to: tvTo, until: tvBase.flatMap { tvResponses[$0]?.until },
+        let updated = GuideResponse(
+            type: selectedType, from: tvFrom, to: tvTo, until: tvBase.flatMap { tvResponses[$0]?.response.until },
             services: Self.clip(services, to: loadedDays)
         )
+        if updated != tvGuide { tvGuide = updated }
     }
 
     /// 連続する取得済みの日をつなぎ、取得できていない日にはマスを作らない。
@@ -398,29 +419,35 @@ final class GuideModel: ProgramSheetModel {
 
     /// 放送日の読みを 1 つの表につなぐ。局は id で寄せ、番組は id で重複を落として始まり順に並べる
     nonisolated static func merge(_ responses: [GuideResponse]) -> [GuideService] {
-        let responses = responses.sorted { $0.from < $1.from }
+        merge(responses.map { TVDayResponse(response: $0, generation: 0) })
+    }
+
+    private nonisolated static func merge(_ responses: [TVDayResponse]) -> [GuideService] {
+        let responses = responses.sorted { $0.response.from < $1.response.from }
         var services: [Int64: GuideService] = [:]
         var order: [Int64] = []
-        var programs: [Int64: [Int64: GuideProgram]] = [:]
-        for response in responses {
-            for service in response.services {
+        var programs: [Int64: [Int64: (program: GuideProgram, generation: Int)]] = [:]
+        for day in responses {
+            let generation = day.generation
+            for service in day.response.services {
                 if services.index(forKey: service.id) == nil {
                     services[service.id] = service
                     order.append(service.id)
                     programs[service.id] = [:]
                 }
                 for program in service.programs {
-                    // 4:00 をまたぐ番組は両日に入る。予約・録画の印が載っている方を残す
-                    if let existing = programs[service.id]?[program.id], hasMark(existing), !hasMark(program) {
-                        continue
+                    // 日をまたぐ番組は新しい応答を優先する。同じ世代なら印がある方を残す。
+                    if let existing = programs[service.id]?[program.id] {
+                        if existing.generation > generation { continue }
+                        if existing.generation == generation, hasMark(existing.program), !hasMark(program) { continue }
                     }
-                    programs[service.id]?[program.id] = program
+                    programs[service.id]?[program.id] = (program, generation)
                 }
             }
         }
         return order.compactMap { id -> GuideService? in
             guard var service = services[id] else { return nil }
-            service.programs = (programs[id] ?? [:]).values.sorted(by: programStartsBefore)
+            service.programs = (programs[id] ?? [:]).values.map(\.program).sorted(by: programStartsBefore)
             return service
         }
     }
@@ -431,6 +458,45 @@ final class GuideModel: ProgramSheetModel {
 
     private nonisolated static func hasMark(_ program: GuideProgram) -> Bool {
         program.reservation != nil || program.recordingId != nil
+    }
+
+    /// 起点日と番組の放送日を待つ。後続の更新が始まっても、待ち手は引き継ぐ。
+    private func refreshAfterRecordingChange(_ item: GuideProgramItem) async {
+        guard isTVGuide else {
+            await reload()
+            return
+        }
+        guard !Task.isCancelled else { return }
+        let start = Date(timeIntervalSince1970: Double(item.startAt) / 1000)
+        // 終了時刻は範囲に含まれない。4:00 ちょうどに終わる番組は翌日にかからない。
+        let last = item.endAt > item.startAt ? item.endAt - 1 : item.startAt
+        let end = Date(timeIntervalSince1970: Double(last) / 1000)
+        let days = GuideLayout.broadcastDay(for: start)...GuideLayout.broadcastDay(for: end)
+        let id = UUID()
+        defer { tvRecordingWaiters[id] = nil }
+
+        let task = startTVGuideLoad(base: tvRefreshBase(now: Date()))
+        await withTaskCancellationHandler {
+            while !Task.isCancelled && !tvRecordingDaysAreReady(days) {
+                let (stream, continuation) = AsyncStream<Void>.makeStream()
+                tvRecordingWaiters[id] = TVRecordingWaiter(days: days, continuation: continuation)
+                var iterator = stream.makeAsyncIterator()
+                _ = await iterator.next()
+            }
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func tvRecordingDaysAreReady(_ days: ClosedRange<Date>) -> Bool {
+        !tvIsLoadingBase && !tvDayLoads.contains { days.contains($0.key) && $0.value == .loading }
+    }
+
+    private func finishTVRecordingWaiters() {
+        for (id, waiter) in tvRecordingWaiters where tvRecordingDaysAreReady(waiter.days) {
+            tvRecordingWaiters[id] = nil
+            waiter.continuation.finish()
+        }
     }
 
     /// 番組の中身。終わった番組は 404 なので、そのときはマスの持つ分だけを出す (3.5)
@@ -449,11 +515,11 @@ final class GuideModel: ProgramSheetModel {
         do {
             let data = try await app.post("api/programs/\(item.id)/record")
             guard let response = try? JSONDecoder().decode(RecordResponse.self, from: data) else {
-                await refresh(waitForRemainingDays: false)
+                await refreshAfterRecordingChange(item)
                 return nil
             }
             if response.reserved {
-                await refresh(waitForRemainingDays: false)
+                await refreshAfterRecordingChange(item)
                 return nil
             }
             return response.reason ?? String(localized: "録画できません")
@@ -467,7 +533,7 @@ final class GuideModel: ProgramSheetModel {
     func cancel(_ item: GuideProgramItem) async -> String? {
         do {
             _ = try await app.delete("api/programs/\(item.id)/record")
-            await refresh(waitForRemainingDays: false)
+            await refreshAfterRecordingChange(item)
             return nil
         } catch {
             return Self.failureMessage(error)

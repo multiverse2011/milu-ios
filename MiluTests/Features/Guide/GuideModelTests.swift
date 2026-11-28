@@ -484,6 +484,142 @@ import Testing
         #expect(await waitUntil { model.program(id: tomorrow)?.name == "更新後" })
     }
 
+    @Test(arguments: [false, true])
+    func tvReservationWaitsForTheProgramDayEvenWhenItsRequestFails(fails: Bool) async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let tomorrow = dayStart(dayOffset(1, from: base))
+        let last = dayStart(dayOffset(2, from: base))
+        let reserved = Box(false)
+        let tomorrowStarted = Gate()
+        let releaseTomorrow = Gate()
+        let lastStarted = Gate()
+        let releaseLast = Gate()
+        let stub = tvTransport(
+            until: { last + 3_600_000 }, title: { reserved.value ? "更新後" : "更新前" },
+            reserved: { $0 == tomorrow && reserved.value },
+            record: { request in
+                #expect(request.httpMethod == "POST")
+                reserved.value = true
+                return reply(request, 200, #"{"recorded":"番組","reserved":true,"state":"scheduled"}"#)
+            },
+            before: { _, from in
+                guard reserved.value else { return }
+                if from == tomorrow {
+                    await tomorrowStarted.open()
+                    try await releaseTomorrow.requireOpen()
+                    if fails { throw URLError(.timedOut) }
+                } else if from == last {
+                    await lastStarted.open()
+                    try await releaseLast.requireOpen()
+                }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let item = try #require(model.program(id: tomorrow))
+        let done = startOperation {
+            #expect(await model.reserve(item) == nil)
+            #expect(model.program(id: tomorrow)?.reservation?.state == (fails ? nil : .scheduled))
+        }
+
+        #expect(await tomorrowStarted.wait())
+        #expect(await lastStarted.wait())
+        #expect(!(await done.wait(for: .milliseconds(100))))
+        await releaseTomorrow.open()
+        #expect(await done.wait(for: .seconds(1)))
+        #expect(model.program(id: last)?.name == "更新前")
+        await releaseLast.open()
+        #expect(await waitUntil { model.program(id: last)?.name == "更新後" })
+    }
+
+    @Test func tvReservationWaitsForTheSuccessorRefreshAfterTheOriginalIsCancelled() async throws {
+        let now = fixedNow()
+        let today = dayStart(GuideLayout.broadcastDay(for: now))
+        let refreshing = Box(false)
+        let reads = Box(0)
+        let oldStarted = Gate()
+        let oldCancelled = Gate()
+        let newStarted = Gate()
+        let releaseNew = Gate()
+        let stub = tvTransport(
+            until: { today + 3_600_000 }, reserved: { _ in refreshing.value },
+            record: { request in
+                refreshing.value = true
+                return reply(request, 200, #"{"recorded":"番組","reserved":true,"state":"scheduled"}"#)
+            },
+            before: { _, from in
+                guard refreshing.value, from == today else { return }
+                reads.value += 1
+                if reads.value == 1 {
+                    await oldStarted.open()
+                    do {
+                        try await Task.sleep(for: .seconds(3))
+                        Issue.record("旧世代の取得が取り消されなかった")
+                    } catch {
+                        await oldCancelled.open()
+                        throw error
+                    }
+                } else {
+                    await newStarted.open()
+                    try await releaseNew.requireOpen()
+                }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let item = try #require(model.program(id: today))
+        let done = startOperation {
+            #expect(await model.reserve(item) == nil)
+            #expect(model.program(id: today)?.reservation?.state == .scheduled)
+        }
+        #expect(await oldStarted.wait())
+        let refreshed = startOperation { await model.refresh(now: now) }
+        #expect(await newStarted.wait())
+        #expect(await oldCancelled.wait())
+        #expect(!(await done.wait(for: .milliseconds(100))))
+        await releaseNew.open()
+        #expect(await done.wait(for: .seconds(1)))
+        #expect(await refreshed.wait())
+    }
+
+    @Test func tvCancellationClearsACrossingProgramMarkEvenWhenTheNextDayFails() async throws {
+        let now = fixedNow()
+        let tomorrow = dayStart(dayOffset(1, from: GuideLayout.broadcastDay(for: now)))
+        let cancelled = Box(false)
+        let tomorrowStarted = Gate()
+        let releaseTomorrow = Gate()
+        let stub = tvTransport(
+            until: { tomorrow + 3_600_000 }, crossingBoundary: tomorrow,
+            reserved: { _ in !cancelled.value },
+            record: { request in
+                #expect(request.httpMethod == "DELETE")
+                cancelled.value = true
+                return reply(request, 200, "{}")
+            },
+            before: { _, from in
+                if cancelled.value, from == tomorrow {
+                    await tomorrowStarted.open()
+                    try await releaseTomorrow.requireOpen()
+                    throw URLError(.timedOut)
+                }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let item = try #require(model.program(id: tomorrow - 600_000))
+        #expect(item.reservation?.state == .scheduled)
+        let done = startOperation { #expect(await model.cancel(item) == nil) }
+        #expect(await tomorrowStarted.wait())
+        #expect(!(await done.wait(for: .milliseconds(100))))
+        await releaseTomorrow.open()
+        #expect(await done.wait(for: .seconds(1)))
+        let current = try #require(model.program(id: item.id))
+        #expect(current.reservation == nil)
+        #expect(current.endAt == item.endAt)
+        #expect(model.program(id: tomorrow) != nil)
+    }
+
     @Test func tvRefreshRetainsAnAlreadyLoadedDayAndItsCursorWhenItFails() async throws {
         let now = fixedNow()
         let base = GuideLayout.broadcastDay(for: now)
@@ -793,6 +929,7 @@ import Testing
         programOffset: Int64 = 0,
         crossingBoundary: Int64? = nil,
         empty: @escaping @Sendable (Int64) -> Bool = { _ in false },
+        reserved: @escaping @Sendable (Int64) -> Bool = { _ in false },
         record: (@Sendable (URLRequest) -> (Data, HTTPURLResponse))? = nil,
         before: @escaping @Sendable (String, Int64) async throws -> Void = { _, _ in }
     ) -> StubTransport {
@@ -812,16 +949,17 @@ import Testing
             let type = String(typePart.dropFirst(5))
             let untilValue = until().map { "\($0)" } ?? "null"
             let name = title()
+            let reservation = reserved(from) ? #"{"state":"scheduled"}"# : "null"
             try await before(type, from)
             let programFields = """
             "name":"\(name)","startAt":\(from + programOffset),"endAt":\(from + programOffset + 3_600_000),
-            "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null
+            "description":null,"genre":1,"copyNever":false,"reservation":\(reservation),"recordingId":null
             """
             var programs = empty(from) ? [] : ["{\"id\":\(from),\(programFields)}"]
             if let boundary = crossingBoundary, from <= boundary, boundary <= to {
                 programs.append("""
                 {"id":\(boundary - 600_000),"name":"日をまたぐ番組","startAt":\(boundary - 600_000),
-                 "endAt":\(boundary + 1_200_000),"copyNever":false}
+                 "endAt":\(boundary + 1_200_000),"copyNever":false,"reservation":\(reservation)}
                 """)
             }
             let body = """
