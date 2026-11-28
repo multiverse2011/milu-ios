@@ -61,6 +61,8 @@ final class PlaybackSession {
     private var renderer: MediaRenderer?
     private var loader: StreamLoader?
     private var captionSource: CaptionSource?
+    /// 一時停止したときの局。再開で字幕のボタンを引き継ぐかの判断に使う
+    private var pausedServiceID: Int64?
     private var captionTimeline = CaptionTimeline()
     /// 映像の応答が返した段。字幕も同じ段を渡して、同じストリームを共有する
     private var rung: String?
@@ -86,6 +88,8 @@ final class PlaybackSession {
     private var bufferedSince: Date?
     private var lastPosition = 0.0
     private var lastProgressAt = Date()
+    /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたかの控え
+    private var press = PressGuard()
 
     init(
         baseURL: URL,
@@ -95,6 +99,7 @@ final class PlaybackSession {
         onInvalidToken: @escaping @MainActor (URL) -> Void,
         onNeedsPairing: @escaping @MainActor (URL) -> Void,
         playable: [OfferCodec] = Playable.formats,
+        clock: @escaping () -> DispatchTime = { .now() },
         startLoader: @escaping (StreamLoader) -> Void = { $0.start() }
     ) {
         self.devicePlayable = playable
@@ -108,6 +113,7 @@ final class PlaybackSession {
         self.onInvalidToken = onInvalidToken
         self.onNeedsPairing = onNeedsPairing
         self.captionsOn = defaults.object(forKey: "captionsOn") as? Bool ?? true
+        self.press.now = clock
     }
 
     /// 画面の `onAppear` で 1 度だけ。レンダラをここで作る (MainActor の init)
@@ -133,6 +139,8 @@ final class PlaybackSession {
         playable = devicePlayable
         policy = LivePlaybackPolicy(playable: playable)
         currentCodec = nil
+        // 選局し直しは新しい押下として扱う。直前の押下の控えを新ストリームへ持ち越さない
+        press.reset()
         cancelTrial()
         committedRung = PlaybackRules.resolveRung(defaults.integer(forKey: "liveRung"))
         selectedRung = committedRung
@@ -323,24 +331,60 @@ final class PlaybackSession {
         pictureInPicture?.stop()
     }
 
+    /// 決定・再生/一時停止ボタンと Now Playing の play/pause/toggle は、同じ押下ならここへ 2 度来る。
+    /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
     @discardableResult
     func play() -> Bool {
         guard service != nil, !closed, stop == nil else { return false }
-        if phase == .paused {
-            startStream(resetPolicy: true)
-            publishNowPlaying(isPlaying: true)
-            pictureInPicture?.invalidatePlaybackState()
-        }
-        return true
+        guard claimPress() else { return true }
+        return resume()
     }
 
     /// ライブにはタイムシフトが無い (D17) ので、一時停止で接続を閉じてチューナーを空ける。
     @discardableResult
     func pause() -> Bool {
         guard service != nil, !closed, stop == nil else { return false }
+        guard claimPress() else { return true }
+        return suspend()
+    }
+
+    @discardableResult
+    func togglePlayPause() -> Bool {
+        guard service != nil, !closed, stop == nil else { return false }
+        guard claimPress() else { return true }
+        if phase == .paused {
+            return resume()
+        }
+        return suspend()
+    }
+
+    /// 押下を控える。窓の外なら控えて true、2 度目なら false。
+    /// 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
+    private func claimPress() -> Bool {
+        press.claim()
+    }
+
+    private func resume() -> Bool {
+        if phase == .paused {
+            // 止めたときと同じ局の続きなら、次の 1 枚が届く数秒も字幕のボタンを出しておく。
+            // 止めている間に局が差し替わった (休止になった) ときは今までどおり落とす
+            let sameService = pausedServiceID == service?.id
+            let hadCaptions = hasCaptions
+            pausedServiceID = nil
+            startStream(resetPolicy: true)
+            hasCaptions = sameService && hadCaptions
+            publishNowPlaying(isPlaying: true)
+            pictureInPicture?.invalidatePlaybackState()
+        }
+        return true
+    }
+
+    private func suspend() -> Bool {
         guard phase == .playing || phase == .loading || phase == .reconnecting else {
             return phase == .paused
         }
+        // 再開で字幕のボタンを引き継いでよいのは、この局の続きに戻るときだけ
+        pausedServiceID = service?.id
         // 試している間に一時停止したら、試しは捨てて選んだ段をその場で確定・保存する
         // (接続の無い一時停止中に選んだときと同じ。再開でその段で開く)
         if trialLoader != nil {
@@ -360,20 +404,12 @@ final class PlaybackSession {
         loader = nil
         captionSource?.stop()
         captionSource = nil
-        captionPage = nil
+        // 止めた絵に最後の字幕を残す (止めている間は新しい 1 枚が来ない)
         renderer?.pause()
         UIApplication.shared.isIdleTimerDisabled = false
         publishNowPlaying(isPlaying: false)
         pictureInPicture?.invalidatePlaybackState()
         return true
-    }
-
-    @discardableResult
-    func togglePlayPause() -> Bool {
-        if phase == .paused {
-            return play()
-        }
-        return pause()
     }
 
     private func publishNowPlaying(isPlaying: Bool) {
@@ -586,6 +622,11 @@ final class PlaybackSession {
         loader = nil
         captionSource?.stop()
         captionSource = nil
+        // 止まった画面 (黒い幕) の下に、前の最後の 1 枚を残さない (close・startStream と同じ片付け)
+        captionTimeline = CaptionTimeline()
+        captionPage = nil
+        captionQueue = []
+        shownCaptionTime = nil
         renderer?.stop()
         nowPlaying.clear(owner: nowPlayingID)
         UIApplication.shared.isIdleTimerDisabled = false
@@ -750,7 +791,8 @@ final class PlaybackSession {
         source.start()
     }
 
-    private func handleCaption(_ frame: CaptionFrame) {
+    /// テストからも呼ぶ (字幕の 1 枚を流して、一時停止したときの `captionPage` を見る)
+    func handleCaption(_ frame: CaptionFrame) {
         guard case .page(let page) = frame.content else { return }
         hasCaptions = true
         // 変換したライブのページの時刻は、映像と同じ fMP4 の時刻 (4.4・api.md)
