@@ -330,6 +330,7 @@ private struct TVGuideBoard: View {
         // 上の的を経由する間は強調を保つ。詳細を閉じる間は格子に焦点が戻るまで表示しない。
         let highlightedColumn = focus == .aboveGrid ? lastColumn : focusColumn
         let focused = opened == nil && !isRestoringDetailFocus && selected?.column == highlightedColumn ? selected : nil
+        let highlighted = focused.flatMap { GuideCursorMotion.program($0, in: guide.services) }
         let nowY = nowOffset(now: now)
         let ring = focusFrame(for: focused)
         let ruler = timeColumn(now: now, nowY: nowY, rows: rows)
@@ -337,7 +338,7 @@ private struct TVGuideBoard: View {
             let x = GuideLayout.tvTimeWidth - position.x
             return ZStack(alignment: .topLeading) {
                 ZStack(alignment: .topLeading) {
-                    columns(gridCells, height: size.height, nowY: nowY, focused: focused, scrollY: position.y)
+                    columns(gridCells, height: size.height, nowY: nowY, highlighted: highlighted, scrollY: position.y)
                         .offset(x: x)
                         .transaction { $0.animation = nil }
                     if let ring {
@@ -434,11 +435,11 @@ private struct TVGuideBoard: View {
     /// マス・過ぎた所の黒・放送日の境目の線。見えている範囲と前後だけを作る
     private func columns(
         _ gridCells: [(column: Int, cells: [Cell])], height: Double,
-        nowY: Double?, focused: GuideCursor?, scrollY: Double
+        nowY: Double?, highlighted: (column: Int, program: GuideProgram)?, scrollY: Double
     ) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(gridCells, id: \.column) { column, cells in
-                ForEach(cells, id: \.item.id) { cell in
+                ForEach(cells) { cell in
                     let top = cell.top + GuideLayout.tvColumnGap / 2
                     TVGuideCell(
                         item: cell.item,
@@ -450,7 +451,8 @@ private struct TVGuideBoard: View {
                     )
                         .offset(x: Double(column) * columnStep(), y: top - scrollY)
                         // フォーカス中のマスは過ぎた所の黒より上に描く (画面案の z の順)
-                        .zIndex(focused?.column == column && focused?.programID == cell.item.id ? 1 : 0)
+                        .zIndex(highlighted?.column == column && highlighted?.program.id == cell.item.id
+                            && highlighted?.program.startAt == cell.item.startAt ? 1 : 0)
                 }
             }
             // 起点より後の 4:00 に、時刻の列の日付見出しと同じ位置で線を引く。
@@ -567,6 +569,13 @@ private struct TVGuideBoard: View {
     /// いまのカーソル。読み直しで番組が消えていたら、焦点の列 (無ければ最後に焦点のあった列) で
     /// 作り直し、その列も使えなければ近い列へ寄せる (先頭の局・いまの時刻へは跳ばさない)
     private func resolvedCursor(now: Date) -> GuideCursor? {
+        if let cursor {
+            if GuideCursorMotion.program(cursor, in: guide.services) != nil { return cursor }
+            if cursor.programID == nil,
+               let position = GuideCursorMotion.cursor(at: cursor.column, anchor: cursor.anchor, in: guide.services) {
+                return position
+            }
+        }
         let time = Int64(now.timeIntervalSince1970 * 1000)
         let anchor = cursor?.anchor ?? time
         if let column = lastColumn ?? focusColumn ?? cursor?.column {
@@ -621,7 +630,18 @@ private struct TVGuideBoard: View {
         return max(0, min(scroll.y, scrollLow.y) - margin)...(max(scroll.y, scrollHigh.y) + Double(size.height) + margin)
     }
 
-    private typealias Cell = (item: GuideProgramItem, title: AttributedString, top: Double, height: Double)
+    private struct Cell: Identifiable {
+        struct ID: Hashable {
+            let programID: Int64
+            let startAt: Int64
+        }
+
+        let item: GuideProgramItem
+        let title: AttributedString
+        let top: Double
+        let height: Double
+        var id: ID { ID(programID: item.id, startAt: item.startAt) }
+    }
 
     private func cells(in column: Int, rows: ClosedRange<Double>) -> [Cell] {
         let service = guide.services[column]
@@ -637,7 +657,7 @@ private struct TVGuideBoard: View {
                 frame.top + frame.height >= rows.lowerBound
             else { return nil }
             let item = GuideProgramItem(service: service, program: program)
-            return (item, TVGuideCell.title(for: item), frame.top, frame.height)
+            return Cell(item: item, title: TVGuideCell.title(for: item), top: frame.top, height: frame.height)
         }
     }
 
@@ -646,7 +666,7 @@ private struct TVGuideBoard: View {
     /// 上は列から上の的やチップへ焦点が移ったときだけ処理する。
     private func moveUp(from column: Int) {
         let current = resolvedCursor(now: Date()).flatMap {
-            GuideCursorMotion.selectedCursor(inColumn: column, from: $0, in: guide.services)
+            $0.column == column ? $0 : GuideCursorMotion.cursor(at: column, anchor: $0.anchor, in: guide.services)
         }
         if let current, let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
             lastColumn = column
@@ -661,7 +681,7 @@ private struct TVGuideBoard: View {
     /// 画面外の隣の列を作る送り先と、その列への焦点を同じ更新で設定する。
     private func moveAcrossColumnEdge(_ edge: ColumnEdge, from column: Int) {
         guard let base = resolvedCursor(now: Date()),
-              let current = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
+              let current = base.column == column ? base : GuideCursorMotion.cursor(at: column, anchor: base.anchor, in: guide.services),
               let next = GuideCursorMotion.horizontal(current, in: guide.services, by: edge.step)
         else {
             focus = GuideCursorMotion.isUsable(column, in: guide.services) ? .column(column) : nil
@@ -718,7 +738,7 @@ private struct TVGuideBoard: View {
         withAnimation(nil) {
             finishScroll(at: target)
             let previous = cursor.flatMap { GuideCursorMotion.isUsable($0.column, in: services) ? $0.column : nil }
-            if let column = previous ?? services.firstIndex(where: { !$0.programs.isEmpty }),
+            if let column = previous ?? services.firstIndex(where: { !$0.programs.isEmpty }) ?? services.indices.first,
                let next = GuideCursorMotion.cursor(at: column, anchor: time, in: services) {
                 cursor = next
                 follow(next, in: services, animated: false)
@@ -760,6 +780,7 @@ private struct TVGuideBoard: View {
     private func selection(column: Int, now: Date) -> (cursor: GuideCursor, item: GuideProgramItem)? {
         guard let base = resolvedCursor(now: now),
               let cursor = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
+              let frame = focusFrame(for: cursor), frame.maxY > scroll.y, frame.minY < scroll.y + viewport.height,
               let (c, program) = GuideCursorMotion.program(cursor, in: guide.services)
         else { return nil }
         return (cursor, GuideProgramItem(service: guide.services[c], program: program))
@@ -767,14 +788,15 @@ private struct TVGuideBoard: View {
 
     /// 決定。焦点の列 (タップした列) の番組を開く
     private func open(column: Int, now: Date) {
-        guard !isDetailCoverActive, let selection = selection(column: column, now: now) else { return }
+        guard !isDetailCoverActive, let selection = selection(column: column, now: now),
+              let item = model.program(id: selection.item.id) else { return }
         cursor = selection.cursor
         lastColumn = column
         liveWatchAtOpen = app.liveWatch
         isRestoringDetailFocus = false
         isDetailCoverActive = true
         detailGeneration += 1
-        opened = selection.item
+        opened = item
     }
 
     /// Menu をシステムが処理してカバーを閉じる場合も、同じ閉じ始めの処理を通す。
@@ -833,7 +855,8 @@ private struct TVGuideBoard: View {
         }
 
         if let cursor, let target = GuideCursorMotion.cursorAfterRefresh(
-            cursor, previous: previous.services, current: current.services, range: model.tvFrom..<model.tvTo
+            cursor, previous: previous.services, current: current.services, range: model.tvFrom..<model.tvTo,
+            hasResponse: model.tvHasResponse(at: cursor.anchor)
         ), target != cursor {
             withAnimation(nil) {
                 self.cursor = target

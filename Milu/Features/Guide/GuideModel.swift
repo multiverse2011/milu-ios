@@ -63,6 +63,8 @@ final class GuideModel: ProgramSheetModel {
     private var tvGeneration = 0
     /// 一括取得は最大 1 つ。新しい世代を始めると前の取得を取り消す。
     private var tvLoadTask: Task<Void, Never>?
+    /// 旧世代の取消後も通信が終わるまで、再試行の枠を 1 つに保つ。
+    private var tvRetryTask: Task<Void, Never>?
     /// 新しい種別は起点の日を読めるまで選択表示に反映しない。
     private var tvRequestedType: ServiceType?
     /// 現在の世代の日別取得状況。追加の再試行は同時に 1 日だけ。
@@ -137,8 +139,15 @@ final class GuideModel: ProgramSheetModel {
 
     /// いま開いている範囲の番組 (シートの中身の最新)
     func program(id: Int64) -> GuideProgramItem? {
-        let source = isTVGuide ? tvGuide : guide
-        return source?.services.lazy.flatMap { service in
+        if isTVGuide {
+            guard let service = tvGuide?.services.first(where: { $0.programs.contains { $0.id == id } }) else { return nil }
+            // 詳細には描画用の切り取り前の時刻と予約・録画情報を渡す。
+            let matches = tvDays.compactMap { day in
+                tvResponses[day]?.services.first { $0.id == service.id }?.programs.first { $0.id == id }
+            }
+            return (matches.last(where: Self.hasMark) ?? matches.last).map { GuideProgramItem(service: service, program: $0) }
+        }
+        return guide?.services.lazy.flatMap { service in
             service.programs.map { GuideProgramItem(service: service, program: $0) }
         }.first { $0.id == id }
     }
@@ -208,6 +217,7 @@ final class GuideModel: ProgramSheetModel {
         tvGeneration += 1
         let generation = tvGeneration
         tvLoadTask?.cancel()
+        tvRetryTask?.cancel()
         tvDayLoads = Dictionary(uniqueKeysWithValues: tvDays.map { ($0, .loading) })
         let task = Task {
             defer {
@@ -289,20 +299,31 @@ final class GuideModel: ProgramSheetModel {
         }
     }
 
+    func tvHasResponse(at time: Int64) -> Bool {
+        let day = GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double(time) / 1000))
+        return tvResponses[day] != nil
+    }
+
     /// 通常取得を終えた空の日だけを、更新世代につき 1 回読み直す。
     func tvRetry(day: Date) async {
         guard tvRequestedType == nil, tvDays.contains(day), tvResponses[day] == nil, tvDayLoads[day] == nil,
-              !tvDayLoads.values.contains(.retrying)
+              tvRetryTask == nil
         else { return }
         tvDayLoads[day] = .retrying
         let generation = tvGeneration
-        let response = await Self.readTVDay(day, type: selectedType, app: app)
-        guard generation == tvGeneration else { return }
-        tvDayLoads[day] = .retried
-        if let response {
-            tvResponses[day] = response
-            publishTVGuide()
+        let type = selectedType
+        let task = Task {
+            defer { tvRetryTask = nil }
+            let response = await Self.readTVDay(day, type: type, app: app)
+            guard generation == tvGeneration else { return }
+            tvDayLoads[day] = .retried
+            if let response {
+                tvResponses[day] = response
+                publishTVGuide()
+            }
         }
+        tvRetryTask = task
+        await task.value
     }
 
     private nonisolated static func readTVDay(_ day: Date, type: ServiceType, app: AppModel) async -> GuideResponse? {
@@ -316,24 +337,48 @@ final class GuideModel: ProgramSheetModel {
     }
 
     private func publishTVGuide() {
-        let responses = tvDays.compactMap { tvResponses[$0] }
+        let loadedDays = tvDays.filter { tvResponses[$0] != nil }
+        let services = Self.merge(loadedDays.compactMap { tvResponses[$0] })
         tvGuide = GuideResponse(
             type: selectedType, from: tvFrom, to: tvTo, until: tvBase.flatMap { tvResponses[$0]?.until },
-            services: Self.merge(responses)?.services ?? []
+            services: Self.clip(services, to: loadedDays)
         )
     }
 
+    /// 連続する取得済みの日をつなぎ、取得できていない日にはマスを作らない。
+    private nonisolated static func clip(_ services: [GuideService], to days: [Date]) -> [GuideService] {
+        var ranges: [Range<Int64>] = []
+        for day in days {
+            let (start, end) = GuideLayout.broadcastRange(for: day)
+            if let last = ranges.last, last.upperBound == start {
+                ranges[ranges.count - 1] = last.lowerBound..<end
+            } else {
+                ranges.append(start..<end)
+            }
+        }
+        return services.map { service in
+            var result = service
+            result.programs = service.programs.flatMap { program in
+                ranges.compactMap { range -> GuideProgram? in
+                    let start = max(program.startAt, range.lowerBound)
+                    let end = min(program.endAt, range.upperBound)
+                    guard start < end else { return nil }
+                    var clipped = program
+                    clipped.startAt = start
+                    clipped.endAt = end
+                    return clipped
+                }
+            }.sorted(by: programStartsBefore)
+            return result
+        }
+    }
+
     /// 放送日の読みを 1 つの表につなぐ。局は id で寄せ、番組は id で重複を落として始まり順に並べる
-    nonisolated static func merge(_ responses: [GuideResponse]) -> GuideResponse? {
+    nonisolated static func merge(_ responses: [GuideResponse]) -> [GuideService] {
         let responses = responses.sorted { $0.from < $1.from }
-        guard let first = responses.first, let last = responses.last else { return nil }
         var services: [Int64: GuideService] = [:]
         var order: [Int64] = []
         var programs: [Int64: [Int64: GuideProgram]] = [:]
-        func hasMark(_ program: GuideProgram) -> Bool {
-            if case .some = program.reservation { return true }
-            return program.recordingId != nil
-        }
         for response in responses {
             for service in response.services {
                 if services.index(forKey: service.id) == nil {
@@ -350,20 +395,19 @@ final class GuideModel: ProgramSheetModel {
                 }
             }
         }
-        let merged = order.compactMap { id -> GuideService? in
+        return order.compactMap { id -> GuideService? in
             guard var service = services[id] else { return nil }
-            service.programs = (programs[id] ?? [:]).values.sorted {
-                $0.startAt == $1.startAt ? $0.id < $1.id : $0.startAt < $1.startAt
-            }
+            service.programs = (programs[id] ?? [:]).values.sorted(by: programStartsBefore)
             return service
         }
-        return GuideResponse(
-            type: first.type,
-            from: first.from,
-            to: last.to,
-            until: responses.compactMap(\.until).max(),
-            services: merged
-        )
+    }
+
+    private nonisolated static func programStartsBefore(_ first: GuideProgram, _ second: GuideProgram) -> Bool {
+        first.startAt == second.startAt ? first.id < second.id : first.startAt < second.startAt
+    }
+
+    private nonisolated static func hasMark(_ program: GuideProgram) -> Bool {
+        program.reservation != nil || program.recordingId != nil
     }
 
     /// 番組の中身。終わった番組は 404 なので、そのときはマスの持つ分だけを出す (3.5)

@@ -231,19 +231,18 @@ import Testing
         #expect(query.contains("from="))
     }
 
-    // MARK: tvOS の窓
+    // MARK: tvOS の全日取得
 
     private func response(
         from: Int64,
         to: Int64,
-        programs: [(id: Int64, startAt: Int64)],
-        until: Int64? = nil
+        programs: [(id: Int64, startAt: Int64)]
     ) -> GuideResponse {
         GuideResponse(
             type: .GR,
             from: from,
             to: to,
-            until: until,
+            until: nil,
             services: [
                 GuideService(
                     id: 3273601024,
@@ -270,14 +269,11 @@ import Testing
     }
 
     @Test func mergeJoinsDaysInTimeOrder() throws {
-        let first = response(from: 1_000, to: 9_000, programs: [(1, 2_000), (2, 5_000)], until: 8_000)
-        let second = response(from: 9_000, to: 17_000, programs: [(2, 5_000), (3, 9_000)], until: 12_000)
-        let merged = try #require(GuideModel.merge([second, first]))
-        #expect(merged.from == 1_000)
-        #expect(merged.to == 17_000)
-        #expect(merged.until == 12_000)
+        let first = response(from: 1_000, to: 9_000, programs: [(1, 2_000), (2, 5_000)])
+        let second = response(from: 9_000, to: 17_000, programs: [(2, 5_000), (3, 9_000)])
+        let merged = GuideModel.merge([second, first])
         // 2 日目にも出てくる番組は 1 つにまとめ、始まり順に並べる
-        #expect(merged.services.first?.programs.map(\.id) == [1, 2, 3])
+        #expect(merged.first?.programs.map(\.id) == [1, 2, 3])
     }
 
     @Test func mergeKeepsCrossingProgramOnce() throws {
@@ -300,11 +296,11 @@ import Testing
             )
         }
         // 印が載っている方が後の日の応答でない場合でも落とさない
-        let merged = try #require(GuideModel.merge([
+        let merged = GuideModel.merge([
             guide(from: boundary - 86_400_000, to: boundary, programs: [reserved]),
             guide(from: boundary, to: boundary + 86_400_000, programs: [crossing]),
-        ]))
-        let programs = try #require(merged.services.first?.programs)
+        ])
+        let programs = try #require(merged.first?.programs)
         #expect(programs.map(\.id) == [7])
         #expect(programs.first?.reservation != nil)
     }
@@ -314,7 +310,7 @@ import Testing
         let (model, _, _) = fixture(stub)
         await model.reload()
         #expect(model.guide != nil)
-        // iOS の読みは tvOS の窓に触らない
+        // iOS の読みは tvOS の全日取得に触らない
         #expect(model.tvGuide == nil)
         #expect(model.tvDays.isEmpty)
     }
@@ -332,16 +328,16 @@ import Testing
         let stub = tvTransport(until: { starts[5] + 3_600_000 }, before: { _, from in
             if from == starts[0] {
                 await todayStarted.open()
-                await releaseToday.wait()
+                try await releaseToday.requireOpen()
             } else if from == starts[1] || from == starts[3] {
                 await slowStarted.open()
-                await releaseSlow.wait()
+                try await releaseSlow.requireOpen()
             } else if from == starts[2] {
-                await releaseFast.wait()
+                try await releaseFast.requireOpen()
             }
         })
         let (model, _, _) = fixture(stub, now: now)
-        let start = Task { await model.tvStart(now: now) }
+        let start = startOperation { await model.tvStart(now: now) }
         #expect(await todayStarted.wait())
         #expect(programRequestDays(stub) == [starts[0]])
         #expect(model.tvGuide == nil)
@@ -360,7 +356,7 @@ import Testing
         #expect(origin == starts[0])
         let before = GuideLayout.offset(of: Double(starts[2]), from: Double(origin), pointsPerMinute: GuideLayout.tvPointsPerMinute)
         await releaseSlow.open()
-        await start.value
+        #expect(await start.wait())
 
         #expect(model.tvDays == days)
         #expect(model.program(id: starts[1]) != nil)
@@ -384,7 +380,7 @@ import Testing
         let stub = tvTransport(until: { laterStart + 3_600_000 }, before: { _, from in
             if from == missingStart, isRetry.value {
                 await retryStarted.open()
-                await releaseRetry.wait()
+                try await releaseRetry.requireOpen()
             }
             if from == missingStart, fails.value { throw URLError(.timedOut) }
         })
@@ -396,12 +392,12 @@ import Testing
         #expect(model.tvBlockingDay(after: dayStart(base), before: laterStart) == missing)
 
         isRetry.value = true
-        let retry = Task { await model.tvRetry(day: missing) }
+        let retry = startOperation { await model.tvRetry(day: missing) }
         #expect(await retryStarted.wait())
         await model.tvRetry(day: missing)
         #expect(model.tvBlockingDay(after: dayStart(base), before: laterStart) == missing)
         await releaseRetry.open()
-        await retry.value
+        #expect(await retry.wait())
         await model.tvRetry(day: missing)
         #expect(programRequestDays(stub).filter { $0 == missingStart }.count == 2)
         #expect(model.program(id: missingStart) == nil)
@@ -411,6 +407,88 @@ import Testing
         await model.refresh(now: now)
         #expect(model.program(id: missingStart) != nil)
         #expect(programRequestDays(stub).filter { $0 == missingStart }.count == 3)
+    }
+
+    @Test func tvRefreshCancelsTheOldRetryAndKeepsItsSlotUntilTheRequestEnds() async throws {
+        let now = fixedNow()
+        let missing = dayOffset(1, from: GuideLayout.broadcastDay(for: now))
+        let start = dayStart(missing)
+        let attempts = Box(0)
+        let oldReply = Box(true)
+        let oldCancelled = Box(false)
+        let oldStarted = Gate()
+        let releaseOld = Gate()
+        let oldFinished = Gate()
+        let stub = tvTransport(until: { start + 3_600_000 }, title: { oldReply.value ? "旧番組" : "新番組" }, before: { _, from in
+            guard from == start else { return }
+            attempts.value += 1
+            switch attempts.value {
+            case 1, 3:
+                throw URLError(.timedOut)
+            case 2:
+                await oldStarted.open()
+                let released = await Task.detached { await releaseOld.wait() }.value
+                guard released else {
+                    Issue.record("旧再試行の応答を解放できなかった")
+                    throw URLError(.timedOut)
+                }
+                oldCancelled.value = Task.isCancelled
+            default:
+                break
+            }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        Task {
+            await model.tvRetry(day: missing)
+            await oldFinished.open()
+        }
+        #expect(await oldStarted.wait())
+        oldReply.value = false
+        await model.refresh(now: now)
+        await model.tvRetry(day: missing)
+        #expect(attempts.value == 3)
+        #expect(model.program(id: start) == nil)
+
+        await releaseOld.open()
+        #expect(await oldFinished.wait())
+        #expect(oldCancelled.value)
+        #expect(model.program(id: start) == nil)
+        await model.tvRetry(day: missing)
+        #expect(attempts.value == 4)
+        #expect(model.program(id: start)?.name == "新番組")
+    }
+
+    @Test func tvCrossingProgramStopsAtTheMissingDayAndRejoinsAfterRetry() async throws {
+        let now = fixedNow()
+        let missing = dayOffset(1, from: GuideLayout.broadcastDay(for: now))
+        let boundary = dayStart(missing)
+        let fail = Box(true)
+        let id = boundary - 600_000
+        let stub = tvTransport(until: { boundary + 3_600_000 }, crossingBoundary: boundary, before: { _, from in
+            if from == boundary, fail.value { throw URLError(.timedOut) }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+
+        let before = try #require(model.tvGuide?.services)
+        let shortened = try #require(before.first?.programs.first { $0.id == id })
+        #expect(shortened.startAt == id)
+        #expect(shortened.endAt == boundary)
+        #expect(model.program(id: id)?.endAt == boundary + 1_200_000)
+        let empty = try #require(GuideCursorMotion.cursor(at: 0, anchor: boundary, in: before))
+        #expect(GuideCursorMotion.selectedCursor(inColumn: 0, from: empty, in: before) == nil)
+
+        fail.value = false
+        await model.tvRetry(day: missing)
+        let after = try #require(model.tvGuide?.services)
+        let joined = try #require(after.first?.programs.filter { $0.id == id })
+        #expect(joined.count == 1)
+        #expect(joined.first?.startAt == id)
+        #expect(joined.first?.endAt == boundary + 1_200_000)
+        #expect(GuideCursorMotion.cursorAfterRefresh(
+            empty, previous: before, current: after, range: model.tvFrom..<model.tvTo
+        )?.programID == id)
     }
 
     @Test func tvRefreshDiscardsLateResponsesShrinksDaysAndRestoresCursor() async throws {
@@ -431,12 +509,12 @@ import Testing
             before: { _, from in
                 if from == tomorrowStart, old.value {
                     await staleStarted.open()
-                    _ = await Task.detached { await releaseStale.wait() }.value
+                    try await Task.detached { try await releaseStale.requireOpen() }.value
                 }
             }
         )
         let (model, _, _) = fixture(stub, now: now)
-        let start = Task { await model.tvStart(now: now) }
+        let start = startOperation { await model.tvStart(now: now) }
         #expect(await staleStarted.wait())
         #expect(await waitUntil { model.program(id: removedStart) != nil })
         let previous = model.tvGuide
@@ -445,7 +523,7 @@ import Testing
         cutoff.value = newUntil
         await model.refresh(now: now)
         await releaseStale.open()
-        await start.value
+        #expect(await start.wait())
 
         #expect(model.tvDays == [base, tomorrow])
         #expect(model.tvGuide?.until == newUntil)
@@ -490,7 +568,7 @@ import Testing
             if from == todayStart, fail.value { throw URLError(.timedOut) }
             if from == nextStart {
                 await nextStarted.open()
-                await releaseNext.wait()
+                try await releaseNext.requireOpen()
             }
         })
         let (model, _, _) = fixture(stub, now: now)
@@ -502,14 +580,14 @@ import Testing
         #expect(stub.requests.filter { $0.url?.query?.contains("type=CS&") == true }.count == 1)
 
         fail.value = false
-        let selection = Task { await model.tvSelectType(.CS, now: now) }
+        let selection = startOperation { await model.tvSelectType(.CS, now: now) }
         #expect(await nextStarted.wait())
         #expect(model.selectedType == .CS)
         #expect(model.tvGuide?.type == .CS)
         #expect(model.program(id: todayStart) != nil)
         #expect(model.program(id: nextStart) == nil)
         await releaseNext.open()
-        await selection.value
+        #expect(await selection.wait())
         #expect(model.program(id: nextStart) != nil)
     }
 
@@ -555,6 +633,15 @@ import Testing
         }
     }
 
+    private func startOperation(_ operation: @escaping @MainActor () async -> Void) -> Gate {
+        let done = Gate()
+        Task {
+            await operation()
+            await done.open()
+        }
+        return done
+    }
+
     private func waitUntil(for duration: Duration = .seconds(3), _ condition: () -> Bool) async -> Bool {
         let clock = ContinuousClock()
         let deadline = clock.now + duration
@@ -572,12 +659,12 @@ import Testing
         GuideLayout.calendar.date(byAdding: .day, value: offset, to: day)!
     }
 
-    /// tvOS の窓の読み。要求された from/to の日に 1 本ずつ番組を返す。
-    /// `fails` は from (放送日の 4:00) で決める。from/to が読めない要求は失敗にする
+    /// 要求された放送日ごとに番組を返す。from/to が読めない要求は失敗にする。
     private func tvTransport(
         until: @escaping @Sendable () -> Int64? = { nil },
         title: @escaping @Sendable () -> String = { "番組" },
         programOffset: Int64 = 0,
+        crossingBoundary: Int64? = nil,
         empty: @escaping @Sendable (Int64) -> Bool = { _ in false },
         before: @escaping @Sendable (String, Int64) async throws -> Void = { _, _ in }
     ) -> StubTransport {
@@ -601,11 +688,17 @@ import Testing
             "name":"\(name)","startAt":\(from + programOffset),"endAt":\(from + programOffset + 3_600_000),
             "description":null,"genre":1,"copyNever":false,"reservation":null,"recordingId":null
             """
-            let programs = empty(from) ? "" : "{\"id\":\(from),\(programFields)}"
+            var programs = empty(from) ? [] : ["{\"id\":\(from),\(programFields)}"]
+            if let boundary = crossingBoundary, from <= boundary, boundary <= to {
+                programs.append("""
+                {"id":\(boundary - 600_000),"name":"日をまたぐ番組","startAt":\(boundary - 600_000),
+                 "endAt":\(boundary + 1_200_000),"copyNever":false}
+                """)
+            }
             let body = """
             {"type":"\(type)","from":\(from),"to":\(to),"until":\(untilValue),"services":[
               {"id":3273601024,"name":"ＮＨＫ総合１・東京","mainId":null,"remoteControlKey":1,"logo":null,
-               "programs":[\(programs)]},
+               "programs":[\(programs.joined(separator: ","))]},
               {"id":2,"name":"別の局","mainId":null,"remoteControlKey":2,"logo":null,
                "programs":[{"id":\(from + 1),\(programFields)}]}]}
             """
@@ -626,6 +719,13 @@ private actor Gate {
             try? await Task.sleep(for: .milliseconds(5))
         }
         return opened
+    }
+
+    func requireOpen() async throws {
+        guard await wait() else {
+            Issue.record("テスト用の応答が期限内に解放されなかった")
+            throw URLError(.timedOut)
+        }
     }
 
     func open() {
