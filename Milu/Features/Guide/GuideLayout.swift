@@ -50,11 +50,18 @@ nonisolated enum GuideLayout {
         return first..<(max(first, last) + 1)
     }
 
-    /// 格子の中に列が見えているか。端に接しているだけなら、焦点を当てられる幅はない。
-    static func tvColumnIsVisible(_ column: Int, scrollX: Double, visibleWidth: Double) -> Bool {
-        let left = Double(column) * (tvColumnWidth + tvColumnGap)
-        let right = left + tvColumnWidth
-        return max(left, scrollX) < min(right, scrollX + visibleWidth)
+    /// 列のうち、時刻列を除いた格子の中で焦点を当てられる範囲。
+    static func tvColumnFocusRange(_ column: Int, scrollX: Double, visibleWidth: Double) -> Range<Double>? {
+        let left = Double(column) * (tvColumnWidth + tvColumnGap) - scrollX
+        let lower = max(0, left)
+        let upper = min(visibleWidth, left + tvColumnWidth)
+        return lower < upper ? lower..<upper : nil
+    }
+
+    /// 格子の端の的は、次の列があって直接焦点を移せない方向にだけ出す。
+    static func tvNeedsColumnEdgeTarget(neighbor: Int?, scrollX: Double, visibleWidth: Double) -> Bool {
+        guard let neighbor, visibleWidth > 0 else { return false }
+        return tvColumnFocusRange(neighbor, scrollX: scrollX, visibleWidth: visibleWidth) == nil
     }
 
     /// 選択列を表示したまま、左右の次の列も見えるところまで送る。

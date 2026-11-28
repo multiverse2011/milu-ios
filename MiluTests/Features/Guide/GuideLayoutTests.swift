@@ -147,15 +147,37 @@ struct GuideLayoutTests {
         #expect(GuideLayout.menuLabel(for: days[7], today: now, calendar: calendar, locale: en) == "Sat 21")
     }
 
-    @Test func tvVisibleColumnsRequireAnIntersectionWithTheGrid() {
+    @Test func tvColumnFocusRangesStayInsideTheGrid() {
         let width = 850 - GuideLayout.tvTimeWidth
         let edge = 3 * (GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap)
-        #expect(GuideLayout.tvColumnIsVisible(0, scrollX: 0, visibleWidth: width))
-        #expect(!GuideLayout.tvColumnIsVisible(3, scrollX: 0, visibleWidth: width))
-        #expect(!GuideLayout.tvColumnIsVisible(3, scrollX: edge - width, visibleWidth: width))
-        #expect(GuideLayout.tvColumnIsVisible(3, scrollX: edge - width + 1, visibleWidth: width))
-        #expect(!GuideLayout.tvColumnIsVisible(0, scrollX: GuideLayout.tvColumnWidth, visibleWidth: width))
-        #expect(!GuideLayout.tvColumnIsVisible(0, scrollX: 0, visibleWidth: 0))
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 0, visibleWidth: width) == 0..<262)
+        #expect(GuideLayout.tvColumnFocusRange(3, scrollX: 0, visibleWidth: width) == nil)
+        #expect(GuideLayout.tvColumnFocusRange(3, scrollX: edge - width, visibleWidth: width) == nil)
+        #expect(GuideLayout.tvColumnFocusRange(3, scrollX: edge - width + 1, visibleWidth: width) == (width - 1)..<width)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 242, visibleWidth: width) == 0..<20)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 280, visibleWidth: width) == nil)
+        #expect(GuideLayout.tvColumnFocusRange(0, scrollX: 0, visibleWidth: 0) == nil)
+    }
+
+    @Test func tvEdgeTargetIsOnlyNeededForAnOffscreenNeighbor() {
+        let width = 850 - GuideLayout.tvTimeWidth
+        #expect(GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 3, scrollX: 0, visibleWidth: width))
+        #expect(GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 0, scrollX: 280, visibleWidth: width))
+        #expect(!GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 3, scrollX: 19, visibleWidth: width))
+        #expect(!GuideLayout.tvNeedsColumnEdgeTarget(neighbor: nil, scrollX: 0, visibleWidth: width))
+        #expect(!GuideLayout.tvNeedsColumnEdgeTarget(neighbor: 3, scrollX: 0, visibleWidth: 0))
+    }
+
+    @Test(arguments: [3, 5])
+    func tvHorizontalDestinationCreatesAFullWidthFocusTarget(column: Int) {
+        let viewportWidth = 850.0
+        let visibleWidth = viewportWidth - GuideLayout.tvTimeWidth
+        let x = GuideLayout.tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column, previous: 0, next: nil
+        )
+        let range = GuideLayout.tvColumnFocusRange(column, scrollX: x, visibleWidth: visibleWidth)
+        #expect(GuideLayout.tvColumnRange(scrollX: x, width: viewportWidth, count: column + 1).contains(column))
+        #expect(range.map { $0.upperBound - $0.lowerBound } == GuideLayout.tvColumnWidth)
     }
 
     @Test func tvHorizontalFollowKeepsTheSelectedColumnAcrossAGap() {
