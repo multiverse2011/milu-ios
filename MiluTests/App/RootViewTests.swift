@@ -87,37 +87,35 @@ import UIKit
             defaults.removePersistentDomain(forName: suiteName)
         }
 
-        for _ in 0..<20 where locateNavigationController(from: hosting) == nil {
-            await pump(.milliseconds(50))
-        }
+        await waitUntil { locateNavigationController(from: hosting) != nil }
         let nav = try #require(locateNavigationController(from: hosting))
         #expect(nav.viewControllers.count == 1)
 
         // 接続先を入れて進む → PairView が同じ NavigationStack に push される
         model.address = "http://127.0.0.1:3000"
         await model.connectField()
-        for _ in 0..<40 where nav.viewControllers.count < 2 {
-            await pump(.milliseconds(50))
+        // push とコード取得は別々に進む。最初のコードを受け取ってから戻る。
+        await waitUntil {
+            nav.viewControllers.count == 2 && model.pairing?.code?.deviceCode == "d-1"
         }
         #expect(locateNavigationController(from: hosting) === nav)
-        #expect(nav.viewControllers.count == 2)
+        try #require(nav.viewControllers.count == 2)
+        try #require(model.pairing?.code?.deviceCode == "d-1")
         #expect(nav.topViewController?.navigationItem.hidesBackButton == false)
         #expect(nav.interactivePopGestureRecognizer?.isEnabled == true)
 
         // pop で戻ったとき model.cancelPairing() が呼ばれ、ペアリング状態が残らない
         _ = nav.popViewController(animated: false)
         hosting.view.layoutIfNeeded()
-        for _ in 0..<40 where model.pairing != nil {
-            await pump(.milliseconds(50))
-        }
+        await waitUntil { nav.viewControllers.count == 1 && model.pairing == nil }
         #expect(nav.viewControllers.count == 1)
-        #expect(model.pairing == nil)
+        try #require(model.pairing == nil)
         #expect(model.server == nil)
 
         // もう一度進めること
         await model.connectField()
-        for _ in 0..<40 where nav.viewControllers.count < 2 {
-            await pump(.milliseconds(50))
+        await waitUntil {
+            nav.viewControllers.count == 2 && model.pairing?.code?.deviceCode == "d-2"
         }
         #expect(nav.viewControllers.count == 2)
         #expect(model.pairing != nil)
@@ -125,6 +123,7 @@ import UIKit
     }
 
     @Test func pairingSuccessTransitionsRootViewToMainTab() async throws {
+        let (approval, allowApproval) = AsyncStream<Void>.makeStream()
         let transport = StubTransport { request in
             if request.url?.path.hasSuffix("api/device/code") == true {
                 return reply(
@@ -133,6 +132,9 @@ import UIKit
                 )
             }
             if request.url?.path.hasSuffix("api/device/token") == true {
+                // PairView の push を確認するまで認証成功の応答を保留する。
+                var iterator = approval.makeAsyncIterator()
+                _ = await iterator.next()
                 return reply(request, 200, #"{"token":"denpa_ok","tokenType":"Bearer"}"#)
             }
             if request.value(forHTTPHeaderField: "Authorization") != nil {
@@ -163,35 +165,33 @@ import UIKit
         hosting.view.layoutIfNeeded()
         defer {
             model.cancelPairing()
+            allowApproval.finish()
             window.isHidden = true
             window.rootViewController = nil
             defaults.removePersistentDomain(forName: suiteName)
         }
 
-        for _ in 0..<20 where locateNavigationController(from: hosting) == nil {
-            await pump(.milliseconds(50))
-        }
+        await waitUntil { locateNavigationController(from: hosting) != nil }
         let connectNav = try #require(locateNavigationController(from: hosting))
 
         model.address = "http://127.0.0.1:3000"
         await model.connectField()
-        for _ in 0..<40 where connectNav.viewControllers.count < 2 {
-            await pump(.milliseconds(50))
-        }
-        #expect(connectNav.viewControllers.count == 2)
+        await waitUntil { connectNav.viewControllers.count == 2 }
+        try #require(connectNav.viewControllers.count == 2)
+        allowApproval.finish()
 
-        for _ in 0..<60 where model.server == nil {
-            await pump(.milliseconds(50))
+        await waitUntil {
+            model.server?.token == "denpa_ok" && model.pairing == nil && model.phase == .connected
         }
-        hosting.view.layoutIfNeeded()
-        for _ in 0..<40 where connectNav.view.window != nil {
-            await pump(.milliseconds(50))
+        await waitUntil {
+            connectNav.view.window == nil && locateTabBarController(from: hosting)?.view.window === window
         }
 
         #expect(model.server?.token == "denpa_ok")
         #expect(model.pairing == nil)
         #expect(model.phase == .connected)
         #expect(connectNav.view.window == nil)
+        #expect(locateTabBarController(from: hosting)?.view.window === window)
     }
 
     @Test func rePairingWhileConnectedShowsPairViewAtRootInsteadOfMainTab() async throws {
