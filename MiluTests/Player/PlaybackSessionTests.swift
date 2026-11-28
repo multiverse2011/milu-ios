@@ -15,7 +15,9 @@ import Testing
         defaults: UserDefaults? = nil,
         playable: [OfferCodec] = Playable.formats,
         startLoader: ((StreamLoader) -> Void)? = nil,
-        clock: @escaping () -> DispatchTime = { .now() }
+        clock: @escaping () -> DispatchTime = { .now() },
+        // テストの前提は常に表。ホストアプリが裏でも成否が変わらないようにする
+        appIsBackground: @escaping @MainActor () -> Bool = { false }
     ) -> PlaybackSession {
         let defaults = defaults ?? makeDefaults()
         return PlaybackSession(
@@ -27,7 +29,8 @@ import Testing
             onNeedsPairing: { _ in },
             playable: playable,
             clock: clock,
-            startLoader: startLoader ?? { $0.start() }
+            startLoader: startLoader ?? { $0.start() },
+            appIsBackground: appIsBackground
         )
     }
 
@@ -534,6 +537,37 @@ import Testing
             videoEpoch: session.videoEpoch
         ))
         #expect(session.phase == .reconnecting)
+        session.close()
+    }
+
+    @Test func currentEpochVideoFailureWhileAppIsInBackgroundIsIgnored() {
+        let session = makeSession(appIsBackground: { true })
+        session.open(makeService(), liveCodecs: [.h264])
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 2,
+            timeline: 2,
+            buffered: 1,
+            message: nil,
+            videoFailed: false,
+            generation: session.generation,
+            videoEpoch: session.videoEpoch
+        ))
+        // アプリの状態がまだ裏のまま届いた、いまの世代の videoFailed は失敗にしない
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 3,
+            timeline: 3,
+            buffered: 1,
+            message: "background gpu denied",
+            videoFailed: true,
+            generation: session.generation,
+            videoEpoch: session.videoEpoch
+        ))
+        #expect(session.phase == .playing)
+        #expect(session.stop == nil)
         session.close()
     }
 
