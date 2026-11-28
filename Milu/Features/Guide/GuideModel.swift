@@ -51,65 +51,26 @@ final class GuideModel: ProgramSheetModel {
     /// 一覧を取れなかった (3.5 の「繋がらない」)
     private(set) var didFail = false
 
-    // MARK: tvOS の窓 (状態)。1 日ずつ読んで、1 つの表につなぐ
+    // MARK: tvOS の全日表示
 
-    /// 表の始まりの放送日。開いたときに決め、セッション中は動かさない (送りの座標がずれないように)
+    /// 開いたときの放送日。日を追加してもセッション中の縦座標は変えない。
     private(set) var tvBase: Date?
-    /// いま持っている放送日 (昇順・連続)
-    private(set) var tvDays: [Date] = []
     private(set) var tvGuide: GuideResponse?
     private(set) var tvDidFail = false
-    private var tvResponses: [Int64: GuideResponse] = [:]
-    /// 現在の世代の読みだけが、窓とキャッシュを更新できる。
+    /// 採用済みの種別の日別応答。起点の日の応答が全体の until を決める。
+    private var tvResponses: [Date: GuideResponse] = [:]
+    /// 現在の世代の応答だけを採用する。
     private var tvGeneration = 0
-    /// 最後に表に採用したカーソルの放送日 (SSE の読み直しに使う)
-    private var tvCenter: Date?
-    /// 有効な処理は窓の読みか端の探索のどちらか 1 つ。
-    private var tvLoading: TVLoading?
+    /// 一括取得は最大 1 つ。新しい世代を始めると前の取得を取り消す。
+    private var tvLoadTask: Task<Void, Never>?
+    /// 新しい種別は起点の日を読めるまで選択表示に反映しない。
     private var tvRequestedType: ServiceType?
-    private var tvIsScrollAnimating = false
-    /// 補間中の次の窓は最大 1 つ。種別変更の呼び出し元にはその採否を返す。
-    private var tvPendingWindow: TVPendingWindow?
+    /// 現在の世代の日別取得状況。追加の再試行は同時に 1 日だけ。
+    private var tvDayLoads: [Date: TVDayLoad] = [:]
     private var isTVGuide = false
 
-    private enum TVLoading {
-        case window(TVWindowRead)
-        case edge(Task<TVEdgeResult, Never>)
-
-        func cancel() {
-            switch self {
-            case .window(let read): read.task.cancel()
-            case .edge(let task): task.cancel()
-            }
-        }
-
-        func waitIfInteractive() async -> Bool {
-            switch self {
-            case .window(let read) where read.explicit: _ = await read.task.value
-            case .edge(let task): _ = await task.value
-            case .window: return false
-            }
-            return true
-        }
-    }
-
-    private struct TVWindowRead {
-        let center: Date
-        let type: ServiceType
-        let task: Task<Bool, Never>
-        var explicit: Bool
-    }
-
-    private struct TVPendingWindow {
-        let window: TVWindow
-        var selection: CheckedContinuation<Bool, Never>?
-    }
-
-    private struct TVWindow {
-        let center: Date
-        let days: [Date]
-        let responses: [Int64: GuideResponse]
-        let guide: GuideResponse
+    private enum TVDayLoad {
+        case loading, retrying, retried
     }
 
     init(app: AppModel, now: Date = Date()) {
@@ -145,13 +106,11 @@ final class GuideModel: ProgramSheetModel {
         }
     }
 
-    /// 読み直し。tvOS は窓を、iOS は 1 日を読む
+    /// 読み直し。tvOS は全日を、iOS は 1 日を読む。
     func refresh(now: Date = Date()) async {
         if isTVGuide {
-            while let loading = tvLoading, await loading.waitIfInteractive() {}
-            let readingCenter: Date? = if case .window(let read) = tvLoading { read.center } else { nil }
-            let center = tvPendingWindow?.window.center ?? readingCenter ?? tvCenter ?? selectedDay
-            await tvReload(center: center, now: now, force: true)
+            let today = GuideLayout.broadcastDay(for: now)
+            await loadTVGuide(base: tvRequestedType == nil ? tvBase ?? today : today)
         } else {
             await reload()
         }
@@ -163,12 +122,17 @@ final class GuideModel: ProgramSheetModel {
     }
 
     func menuDays(now: Date) -> [Date] {
-        GuideLayout.menuDays(now: now, until: isTVGuide ? tvGuide?.until : guide?.until)
+        if isTVGuide { return tvDays }
+        return GuideLayout.menuDays(now: now, until: guide?.until)
     }
 
-    /// 表の先頭 (UNIX ミリ秒)。セッション中は動かさない
+    /// 起点の日の応答から決めた全日。取得中・失敗の日も同じ座標とチップを持つ。
+    var tvDays: [Date] {
+        guard let tvBase, let today = tvResponses[tvBase] else { return [] }
+        return GuideLayout.menuDays(now: Date(timeIntervalSince1970: Double(tvFrom) / 1000), until: today.until)
+    }
+
     var tvFrom: Int64 { GuideLayout.broadcastRange(for: tvBase ?? selectedDay).from }
-    /// 表の末尾。持っている最後の日の翌 4:00
     var tvTo: Int64 { tvDays.last.map { GuideLayout.broadcastRange(for: $0).to } ?? tvFrom }
 
     /// いま開いている範囲の番組 (シートの中身の最新)
@@ -227,317 +191,136 @@ final class GuideModel: ProgramSheetModel {
         }
     }
 
-    // MARK: tvOS の窓 (読み)
+    // MARK: tvOS の全日取得
 
-    /// tvOS の番組表を開く。開いた日〜翌日を読む (前の日は読まない)
     func tvStart(now: Date = Date()) async {
-        await tvReload(center: tvCenter ?? GuideLayout.broadcastDay(for: now), now: now)
-    }
-
-    /// 種別は読みが採用されたときに確定する。
-    @discardableResult
-    func tvSelectType(_ type: ServiceType) -> Bool {
-        guard type != (tvRequestedType ?? selectedType) else { return false }
-        invalidateTVRead()
-        tvRequestedType = type == selectedType ? nil : type
-        return tvRequestedType != nil
-    }
-
-    /// カーソルの放送日の前後 1 日を読む。明示選択は同じ先読みを待ち、採用されたときに成功を返す。
-    @discardableResult
-    func tvReload(center: Date, now: Date = Date(), force: Bool = false, explicit: Bool = false) async -> Bool {
-        let type = tvRequestedType ?? selectedType
-        switch tvLoading {
-        case .window(var read):
-            if read.center == center, read.type == type, !force {
-                if explicit {
-                    read.explicit = true
-                    tvLoading = .window(read)
-                }
-                return await read.task.value
-            }
-            if read.explicit, !explicit { return false }
-        case .edge where !explicit: return false
-        default: break
-        }
-        let explicit = explicit || tvRequestedType != nil
-        if !force, let pending = tvPendingWindow?.window, pending.center == center, pending.guide.type == type {
-            if explicit { resolveTVPending(adopt: true) }
-            return pending.days.contains(center)
-        }
-        let pending = tvPendingWindow?.window
-        let pendingUntil = pending?.guide.until
-        let knownUntil = pending?.guide.type == type && pendingUntil != tvGuide?.until ? pendingUntil : nil
-        if !force, let knownUntil, key(center) >= knownUntil { return false }
-
-        // 同じ窓を強制更新している間も、探索で分かった上限は送りの完了時に適用できる。
-        invalidateTVRead(keepPending: force && pending?.center == center && knownUntil != nil)
-        let generation = tvGeneration
         isTVGuide = true
-        if tvBase == nil { tvBase = center }
+        await loadTVGuide(base: GuideLayout.broadcastDay(for: now))
+    }
+
+    func tvSelectType(_ type: ServiceType, now: Date = Date()) async {
+        guard type != (tvRequestedType ?? selectedType) else { return }
+        tvRequestedType = type
+        await loadTVGuide(base: GuideLayout.broadcastDay(for: now))
+    }
+
+    private func loadTVGuide(base: Date) async {
+        tvGeneration += 1
+        let generation = tvGeneration
+        tvLoadTask?.cancel()
+        tvDayLoads = Dictionary(uniqueKeysWithValues: tvDays.map { ($0, .loading) })
         let task = Task {
             defer {
                 if generation == tvGeneration {
-                    tvLoading = nil
+                    tvLoadTask = nil
                     tvRequestedType = nil
+                    tvDayLoads = tvDayLoads.filter { $0.value != .loading }
                 }
             }
             do {
                 try await loadTypesIfNeeded()
             } catch {
-                if generation == tvGeneration, tvGuide == nil { tvDidFail = true }
-                return false
+                if generation == tvGeneration, !Task.isCancelled, tvGuide == nil { tvDidFail = true }
+                return
             }
-            guard generation == tvGeneration else { return false }
+            guard generation == tvGeneration, !Task.isCancelled else { return }
             let type = tvRequestedType ?? selectedType
-            let window = await readTVWindow(
-                center: center, type: type, now: now, force: force, generation: generation, refreshedUntil: knownUntil
-            )
-            guard generation == tvGeneration else { return false }
-            guard let window else {
+            let today = await Self.readTVDay(base, type: type, app: app)
+            guard generation == tvGeneration, !Task.isCancelled else { return }
+
+            let sameGuide = base == tvBase && type == selectedType
+            if let today {
+                if !sameGuide { tvResponses.removeAll() }
+                tvBase = base
+                tvResponses[base] = today
+                let days = Set(tvDays)
+                tvResponses = tvResponses.filter { $0.key == base || days.contains($0.key) }
+                selectedType = type
+                tvDidFail = false
+                publishTVGuide()
+            } else if !sameGuide || tvResponses[base] == nil {
                 if tvGuide == nil { tvDidFail = true }
-                return false
+                return
             }
-            let applied = window.days.contains(center) || force
-            if tvIsScrollAnimating, window.guide.type != selectedType {
-                return await withCheckedContinuation { continuation in
-                    tvPendingWindow = TVPendingWindow(window: window, selection: continuation)
-                } && applied
-            }
-            if tvIsScrollAnimating, case .window(let read) = tvLoading, !read.explicit {
-                tvPendingWindow = TVPendingWindow(window: window)
-            } else {
-                adoptTVWindow(window)
-            }
-            return applied
+
+            tvRequestedType = nil
+            await loadTVRemainingDays(tvDays.filter { $0 != base }, type: type, generation: generation)
         }
-        tvLoading = .window(TVWindowRead(center: center, type: type, task: task, explicit: explicit))
-        return await task.value
-    }
-
-    /// 送りの連鎖が終わるまで、描画中のマスと時刻目盛りの窓を保持する。
-    func tvSetScrollAnimating(_ animating: Bool) {
-        tvIsScrollAnimating = animating
-        if !animating { resolveTVPending(adopt: true) }
-    }
-
-    enum TVEdgeResult: Equatable {
-        case moved, exhausted, waiting
-    }
-
-    /// 窓の外を隣の日から順に調べ、同じ局の次の番組を見つけるまで表示中の窓を保つ。
-    func tvExtend(
-        from cursor: GuideCursor, direction: Int, now: Date = Date(),
-        onMove: @escaping (GuideCursor) -> Void = { _ in }
-    ) async -> TVEdgeResult {
-        if case .window(let read) = tvLoading, read.explicit { return .waiting }
-        guard !Task.isCancelled, direction == -1 || direction == 1, tvRequestedType == nil,
-              let guide = tvGuide,
-              let (_, current) = GuideCursorMotion.program(cursor, in: guide.services),
-              let base = tvBase, let edge = direction < 0 ? tvDays.first : tvDays.last
-        else { return .waiting }
-        let serviceID = guide.services[cursor.column].id
-        let until = tvPendingWindow?.window.guide.until ?? guide.until
-        let last = GuideLayout.menuDays(now: now, until: until).last ?? base
-        guard let first = GuideLayout.calendar.date(byAdding: .day, value: direction, to: edge),
-              base <= first, first <= last else { return .exhausted }
-        invalidateTVRead()
-        let generation = tvGeneration
-        let task = Task {
-            defer {
-                if generation == tvGeneration { tvLoading = nil }
-            }
-            return await searchTVEdge(
-                from: first, direction: direction, serviceID: serviceID, current: current, type: guide.type,
-                base: base, until: until, now: now, generation: generation, onMove: onMove
-            )
-        }
-        tvLoading = .edge(task)
-        return await withTaskCancellationHandler {
+        tvLoadTask = task
+        await withTaskCancellationHandler {
             await task.value
         } onCancel: {
             task.cancel()
         }
     }
 
-    private func searchTVEdge(
-        from first: Date, direction: Int, serviceID: Int64, current: GuideProgram, type: ServiceType,
-        base: Date, until: Int64?, now: Date, generation: Int, onMove: (GuideCursor) -> Void
-    ) async -> TVEdgeResult {
-        var latestUntil = until
-        var last = GuideLayout.menuDays(now: now, until: until).last ?? base
-        var next: Date? = first
-        var result: TVEdgeResult = .exhausted
-        while let day = next, base <= day, day <= last {
-            next = GuideLayout.calendar.date(byAdding: .day, value: direction, to: day)
-            guard let response = await readTVDay(day, type: type, generation: generation) else {
-                result = .waiting
-                break
+    private func loadTVRemainingDays(_ days: [Date], type: ServiceType, generation: Int) async {
+        tvDayLoads = Dictionary(uniqueKeysWithValues: days.map { ($0, .loading) })
+        let app = self.app
+        var remaining = days.makeIterator()
+        await withTaskGroup(of: (Date, GuideResponse?).self) { group in
+            for _ in 0..<3 {
+                guard let day = remaining.next() else { break }
+                group.addTask { (day, await Self.readTVDay(day, type: type, app: app)) }
             }
-            if let reported = response.until {
-                latestUntil = latestUntil == until ? reported : min(latestUntil ?? reported, reported)
-                last = GuideLayout.menuDays(now: now, until: latestUntil).last ?? base
+            for await (day, response) in group {
+                guard generation == tvGeneration, !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
+                tvDayLoads[day] = nil
+                if tvResponses[day] != response {
+                    tvResponses[day] = response
+                    publishTVGuide()
+                }
+                if let day = remaining.next() {
+                    group.addTask { (day, await Self.readTVDay(day, type: type, app: app)) }
+                }
             }
-            if let latestUntil, key(day) >= latestUntil {
-                if direction > 0 { break }
-                continue
-            }
-
-            let programs = response.services.first { $0.id == serviceID }?.programs ?? []
-            let candidates = programs.filter {
-                $0.id != current.id && (direction < 0 ? $0.startAt < current.startAt : $0.startAt > current.startAt)
-            }
-            let program = direction < 0
-                ? candidates.max { $0.startAt < $1.startAt }
-                : candidates.min { $0.startAt < $1.startAt }
-            guard let program else { continue }
-
-            let window = await readTVWindow(
-                center: day, type: type, now: now, force: false, generation: generation,
-                seed: response, refreshedUntil: latestUntil == until ? nil : latestUntil
-            )
-            guard generation == tvGeneration, !Task.isCancelled, let window,
-                  let column = window.guide.services.firstIndex(where: { $0.id == serviceID }),
-                  window.guide.services[column].programs.contains(where: { $0.id == program.id })
-            else {
-                result = .waiting
-                break
-            }
-
-            // 番組の空きを越えるときは、窓と送り先を同じ更新で切り替える。
-            adoptTVWindow(window)
-            onMove(GuideCursor(column: column, programID: program.id, anchor: max(program.startAt, key(day))))
-            return .moved
-        }
-        if let latestUntil, latestUntil != tvGuide?.until, generation == tvGeneration, !Task.isCancelled {
-            await applyTVEdgeLimit(latestUntil, now: now, generation: generation)
-        }
-        return result
-    }
-
-    /// 探索先に番組が無くても、応答から分かった上限を次の探索と表示に反映する。
-    private func applyTVEdgeLimit(_ until: Int64, now: Date, generation: Int) async {
-        guard let base = tvBase, let guide = tvGuide else { return }
-        let days = tvDays.filter { key($0) < until }
-        let last = GuideLayout.menuDays(now: now, until: until).last ?? base
-        let center = min(tvCenter ?? base, days.last ?? max(base, last))
-        let responses = tvResponses.filter { start, _ in start < until }
-        let window: TVWindow
-        if days.isEmpty, key(center) < until, let read = await readTVWindow(
-            center: center, type: guide.type, now: now, force: false, generation: generation, refreshedUntil: until
-        ) {
-            window = read
-        } else {
-            window = makeTVWindow(center: center, days: days, responses: responses, type: guide.type, until: until)
-        }
-        guard generation == tvGeneration, !Task.isCancelled else { return }
-        if tvIsScrollAnimating {
-            tvPendingWindow = TVPendingWindow(window: window)
-        } else {
-            adoptTVWindow(window)
         }
     }
 
-    private func invalidateTVRead(keepPending: Bool = false) {
-        tvGeneration += 1
-        tvLoading?.cancel()
-        tvLoading = nil
-        if !keepPending { resolveTVPending(adopt: false) }
+    /// 次の番組までに未取得の日があれば、下送りはそこで待つ。再試行も失敗した日は空きとして進める。
+    func tvBlockingDay(after time: Int64, before next: Int64?) -> Date? {
+        let start = GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double(time) / 1000))
+        let end = next.map { GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double($0) / 1000)) }
+        return tvDays.first { day in
+            day >= start && day <= (end ?? day) && tvResponses[day] == nil && tvDayLoads[day] != .retried
+        }
     }
 
-    private func resolveTVPending(adopt: Bool) {
-        guard let pending = tvPendingWindow else { return }
-        tvPendingWindow = nil
-        if adopt { adoptTVWindow(pending.window) }
-        pending.selection?.resume(returning: adopt)
+    /// 通常取得を終えた空の日だけを、更新世代につき 1 回読み直す。
+    func tvRetry(day: Date) async {
+        guard tvRequestedType == nil, tvDays.contains(day), tvResponses[day] == nil, tvDayLoads[day] == nil,
+              !tvDayLoads.values.contains(.retrying)
+        else { return }
+        tvDayLoads[day] = .retrying
+        let generation = tvGeneration
+        let response = await Self.readTVDay(day, type: selectedType, app: app)
+        guard generation == tvGeneration else { return }
+        tvDayLoads[day] = .retried
+        if let response {
+            tvResponses[day] = response
+            publishTVGuide()
+        }
     }
 
-    private func readTVDay(_ day: Date, type: ServiceType, generation: Int) async -> GuideResponse? {
-        guard generation == tvGeneration, !Task.isCancelled else { return nil }
+    private nonisolated static func readTVDay(_ day: Date, type: ServiceType, app: AppModel) async -> GuideResponse? {
+        guard !Task.isCancelled else { return nil }
         let range = GuideLayout.broadcastRange(for: day)
         let path = "api/programs?type=\(type.rawValue)&from=\(range.from)&to=\(range.to)"
-        guard let data = try? await app.get(path), generation == tvGeneration, !Task.isCancelled else { return nil }
-        return try? JSONDecoder().decode(GuideResponse.self, from: data)
+        guard let data = try? await app.get(path), !Task.isCancelled,
+              let response = try? JSONDecoder().decode(GuideResponse.self, from: data), response.type == type
+        else { return nil }
+        return response
     }
 
-    private func readTVWindow(
-        center: Date, type: ServiceType, now: Date, force: Bool, generation: Int,
-        seed: GuideResponse? = nil, refreshedUntil: Int64? = nil
-    ) async -> TVWindow? {
-        guard let base = tvBase else { return nil }
-        let previousUntil = tvGuide?.type == type ? tvGuide?.until : nil
-        let knownUntil = refreshedUntil ?? previousUntil
-        let last = GuideLayout.menuDays(now: now, until: knownUntil).last ?? base
-        let days = GuideLayout.tvWindowDays(center: center, first: base, last: last)
-        guard !days.isEmpty else { return nil }
-
-        // 取得結果は採用までローカルに置く。失敗・追い越しで表示窓の外にキャッシュを残さない。
-        var responses: [Int64: GuideResponse] = [:]
-        var fresh: [GuideResponse] = []
-        for day in days {
-            let start = key(day)
-            if let seed, seed.from == start {
-                responses[start] = seed
-                fresh.append(seed)
-            } else if !force, tvGuide?.type == type, let cached = tvResponses[start] {
-                responses[start] = cached
-            } else if let response = await readTVDay(day, type: type, generation: generation) {
-                responses[start] = response
-                fresh.append(response)
-            } else if force, tvGuide?.type == type {
-                responses[start] = tvResponses[start]
-            }
-            guard generation == tvGeneration, !Task.isCancelled else { return nil }
-        }
-
-        let reportedUntil = fresh.compactMap(\.until).max()
-        let until = refreshedUntil.map { min($0, reportedUntil ?? $0) } ?? (fresh.isEmpty ? knownUntil : reportedUntil)
-        let eligible = days.filter { day in until.map { key(day) < $0 } ?? true }
-        let effectiveCenter: Date
-        if let until, key(center) >= until {
-            guard let last = GuideLayout.menuDays(now: now, until: until).last, last >= base else {
-                return makeTVWindow(center: base, days: [], responses: [:], type: type, until: until)
-            }
-            guard force else { return nil }
-            if !eligible.contains(last), refreshedUntil == nil {
-                return await readTVWindow(
-                    center: last, type: type, now: now, force: true, generation: generation, refreshedUntil: until
-                )
-            }
-            effectiveCenter = last
-        } else {
-            effectiveCenter = center
-        }
-        guard let index = eligible.firstIndex(of: effectiveCenter), responses[key(effectiveCenter)] != nil else { return nil }
-        let before = eligible[..<index].reversed().prefix { responses[key($0)] != nil }
-        let after = eligible[index...].prefix { responses[key($0)] != nil }
-        let loaded = Array(before.reversed()) + after
-        return makeTVWindow(center: effectiveCenter, days: loaded, responses: responses, type: type, until: until)
-    }
-
-    private func makeTVWindow(
-        center: Date, days: [Date], responses: [Int64: GuideResponse], type: ServiceType, until: Int64?
-    ) -> TVWindow {
-        let adopted = responses.filter { start, _ in days.contains { key($0) == start } }
-        let merged = Self.merge(Array(adopted.values))
-        let guide = GuideResponse(
-            type: type, from: merged?.from ?? tvFrom, to: merged?.to ?? tvFrom, until: until,
-            services: merged?.services ?? []
+    private func publishTVGuide() {
+        let responses = tvDays.compactMap { tvResponses[$0] }
+        tvGuide = GuideResponse(
+            type: selectedType, from: tvFrom, to: tvTo, until: tvBase.flatMap { tvResponses[$0]?.until },
+            services: Self.merge(responses)?.services ?? []
         )
-        return TVWindow(center: center, days: days, responses: adopted, guide: guide)
-    }
-
-    private func adoptTVWindow(_ window: TVWindow) {
-        tvDays = window.days
-        tvGuide = window.guide
-        tvResponses = window.responses
-        tvCenter = window.center
-        selectedType = window.guide.type
-        tvDidFail = false
-    }
-
-    private func key(_ day: Date) -> Int64 {
-        GuideLayout.broadcastRange(for: day).from
     }
 
     /// 放送日の読みを 1 つの表につなぐ。局は id で寄せ、番組は id で重複を落として始まり順に並べる

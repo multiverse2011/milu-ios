@@ -43,15 +43,26 @@ nonisolated enum GuideCursorMotion {
         return GuideCursor(column: column, programID: program.id, anchor: anchor)
     }
 
-    /// 外れた放送日の代わりに番組を選び、そのマスの中に基準時刻を置く。
-    static func cursorAfterWindowChange(
-        _ cursor: GuideCursor, in services: [GuideService], range: Range<Int64>
+    /// 同じ局・番組を優先する。番組自体が外れたら、残るマスの中に基準時刻を置く。
+    static func cursorAfterRefresh(
+        _ cursor: GuideCursor, previous: [GuideService], current: [GuideService], range: Range<Int64>
     ) -> GuideCursor? {
         guard !range.isEmpty else { return nil }
+        let serviceID = previous.indices.contains(cursor.column) ? previous[cursor.column].id : nil
+        let column = current.firstIndex { $0.id == serviceID } ?? cursor.column
+        let remapped = GuideCursor(column: column, programID: cursor.programID, anchor: cursor.anchor)
+        if range.contains(cursor.anchor), let (_, program) = Self.program(remapped, in: current) {
+            // 日付チップで先に送った位置に番組が届いたら、そのマスを選ぶ。
+            if program.startAt > cursor.anchor || cursor.anchor >= program.endAt,
+               let covering = current[column].programs.first(where: { $0.startAt <= cursor.anchor && cursor.anchor < $0.endAt }) {
+                return GuideCursor(column: column, programID: covering.id, anchor: cursor.anchor)
+            }
+            return remapped
+        }
         let anchor = min(max(cursor.anchor, range.lowerBound), range.upperBound - 1)
-        guard let selected = Self.cursor(at: cursor.column, anchor: anchor, in: services)
-                ?? fallbackCursor(from: cursor.column, anchor: anchor, in: services),
-              let (_, program) = Self.program(selected, in: services)
+        guard let selected = Self.cursor(at: column, anchor: anchor, in: current)
+                ?? fallbackCursor(from: column, anchor: anchor, in: current),
+              let (_, program) = Self.program(selected, in: current)
         else { return nil }
         let start = max(range.lowerBound, program.startAt)
         let end = min(range.upperBound, program.endAt)

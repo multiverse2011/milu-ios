@@ -242,43 +242,17 @@ struct GuideLayoutTests {
         #expect(columnLeft + GuideLayout.tvColumnWidth <= x + viewportWidth - GuideLayout.tvTimeWidth)
     }
 
-    @Test func tvWindowAroundCursor() {
-        // チップに出る日は 0 時の日付 (14〜21)。center も放送日そのもの (0:00) を渡す
-        let first = date(14, 0)
-        let last = date(21, 0)
-        #expect(GuideLayout.tvWindowDays(center: date(14, 0), first: first, last: last) == [date(14, 0), date(15, 0)])
-        #expect(GuideLayout.tvWindowDays(center: date(15, 0), first: first, last: last) == [date(14, 0), date(15, 0), date(16, 0)])
-        #expect(GuideLayout.tvWindowDays(center: date(16, 0), first: first, last: last) == [date(15, 0), date(16, 0), date(17, 0)])
-        // 4:00 より前は前の放送日。呼び出し側が broadcastDay で丸める
-        #expect(GuideLayout.broadcastDay(for: date(16, 2), calendar: calendar) == date(15, 0))
-        // 最後の日はそこで止める
-        #expect(GuideLayout.tvWindowDays(center: date(21, 0), first: first, last: last) == [date(20, 0), date(21, 0)])
-        // until で最後の日が縮んだとき
-        #expect(GuideLayout.tvWindowDays(center: date(16, 0), first: first, last: date(16, 0)) == [date(15, 0), date(16, 0)])
-        // 起点の日より前は持たない
-        #expect(GuideLayout.tvWindowDays(center: date(15, 0), first: date(15, 0), last: last) == [date(15, 0), date(16, 0)])
-    }
-
-    @Test func tvTopEdgeWaitsOnlyIfThereIsAnEarlierDay() {
-        let base = date(14, 0)
-        #expect(GuideLayout.tvHasPreviousDay(firstLoaded: date(15, 0), base: base))
-        #expect(!GuideLayout.tvHasPreviousDay(firstLoaded: base, base: base))
-        #expect(!GuideLayout.tvHasPreviousDay(firstLoaded: nil, base: base))
-    }
-
-    @Test func tvPrependingADayExtendsTheScrollRangeWithoutMovingTheExistingPositions() {
+    @Test func tvAppendingADayExtendsScrollWithoutMovingTheExistingPositions() {
         let origin = ms(14, 4)
-        let end = ms(18, 4)
-        let before = GuideLayout.tvScrollRange(origin: origin, loadedStart: ms(16, 4), loadedEnd: end, viewportHeight: 700)
-        let after = GuideLayout.tvScrollRange(origin: origin, loadedStart: ms(15, 4), loadedEnd: end, viewportHeight: 700)
+        let before = GuideLayout.tvScrollRange(origin: origin, end: ms(16, 4), viewportHeight: 700)
+        let after = GuideLayout.tvScrollRange(origin: origin, end: ms(17, 4), viewportHeight: 700)
         let dayHeight = 1_440 * GuideLayout.tvPointsPerMinute
-        #expect(before.lowerBound == 2 * dayHeight)
-        #expect(after.lowerBound == dayHeight)
-        #expect(after.upperBound == before.upperBound)
+        #expect(after.lowerBound == before.lowerBound)
+        #expect(abs(after.upperBound - before.upperBound - dayHeight) < 0.000_001)
 
-        let scrollLow = before.lowerBound
+        let scrollLow = dayHeight
         let scrollHigh = scrollLow + 200
-        let ringTop = GuideLayout.offset(of: ms(16, 4, 30), from: origin, pointsPerMinute: GuideLayout.tvPointsPerMinute)
+        let ringTop = GuideLayout.offset(of: ms(15, 4, 30), from: origin, pointsPerMinute: GuideLayout.tvPointsPerMinute)
         for range in [before, after] {
             #expect(range.contains(scrollLow))
             #expect(range.contains(scrollHigh))

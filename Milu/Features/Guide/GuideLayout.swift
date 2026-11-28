@@ -138,13 +138,12 @@ nonisolated enum GuideLayout {
         max(0, nowOffset - viewportHeight / 4)
     }
 
-    /// 座標の起点を保ったまま、読み込んだ範囲に送り先を収める。
+    /// 固定の起点から、最後の放送日の末尾までに送り先を収める。
     static func tvScrollRange(
-        origin: Double, loadedStart: Double, loadedEnd: Double, viewportHeight: Double
+        origin: Double, end: Double, viewportHeight: Double
     ) -> ClosedRange<Double> {
-        let top = offset(of: loadedStart, from: origin, pointsPerMinute: tvPointsPerMinute)
-        let bottom = offset(of: loadedEnd, from: origin, pointsPerMinute: tvPointsPerMinute)
-        return top...max(top, bottom - viewportHeight)
+        let bottom = offset(of: end, from: origin, pointsPerMinute: tvPointsPerMinute)
+        return 0...max(0, bottom - viewportHeight)
     }
 
     /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
@@ -195,33 +194,6 @@ nonisolated enum GuideLayout {
         let start = calendar.date(bySettingHour: broadcastDayStartHour, minute: 0, second: 0, of: day)!
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         return (Int64(start.timeIntervalSince1970 * 1000), Int64(end.timeIntervalSince1970 * 1000))
-    }
-
-    /// tvOS の番組表で持つ放送日。`center` (放送日そのもの。0:00) の前後 1 日ずつで、
-    /// `first` (表の起点の日)〜`last` (チップに出る最後の日) の外は取らない
-    static func tvWindowDays(
-        center: Date,
-        first: Date,
-        last: Date,
-        calendar: Calendar = GuideLayout.calendar
-    ) -> [Date] {
-        let start = max(first, calendar.date(byAdding: .day, value: -1, to: center) ?? center)
-        let end = min(last, calendar.date(byAdding: .day, value: 1, to: center) ?? center)
-        guard start <= end else { return [] }
-        var days: [Date] = []
-        var next = start
-        while next <= end {
-            days.append(next)
-            guard let after = calendar.date(byAdding: .day, value: 1, to: next) else { break }
-            next = after
-        }
-        return days
-    }
-
-    /// 窓の先頭からさらに前の放送日を読めるなら、上端でも焦点を格子に戻す。
-    static func tvHasPreviousDay(firstLoaded: Date?, base: Date?) -> Bool {
-        guard let firstLoaded, let base else { return false }
-        return firstLoaded > base
     }
 
     /// 時刻の列に出す日の見出し。時刻の列 (70pt) に収めるため月/日だけの「11/29」
