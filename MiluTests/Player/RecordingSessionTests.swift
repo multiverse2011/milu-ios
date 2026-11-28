@@ -617,6 +617,42 @@ import Testing
         await session.close()
     }
 
+    @Test func currentEpochVideoFailureWhileAppIsInBackgroundIsIgnored() async throws {
+        let session = RecordingSession(
+            baseURL: URL(string: "http://127.0.0.1:9")!,
+            token: nil,
+            recording: try makeRecording(),
+            playable: [.h264],
+            app: nil,
+            nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()),
+            appIsBackground: { true }
+        )
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 10,
+            timeline: 10,
+            buffered: 5,
+            message: nil,
+            videoFailed: false,
+            generation: 0
+        ))
+        // アプリの状態がまだ裏のまま届いた、いまの世代の videoFailed は失敗にしない
+        session.receive(RendererState(
+            isPlaying: true,
+            codec: "avc1",
+            position: 11,
+            timeline: 11,
+            buffered: 5,
+            message: "background gpu denied",
+            videoFailed: true,
+            generation: 0
+        ))
+        #expect(session.phase == .playing)
+        #expect(session.stop == nil)
+        await session.close()
+    }
+
     @Test func reopensFromCurrentPositionWhenForegroundReplayCannotCoverNow() async throws {
         let playbackJSON = """
         {"duration":60,"axis":"encoded","audios":[{"id":"0","label":"主音声"}],

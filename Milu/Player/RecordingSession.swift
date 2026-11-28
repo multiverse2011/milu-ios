@@ -124,6 +124,8 @@ final class RecordingSession {
     var currentStreamURL: URL? { loader?.url }
     private let startStream: (StreamLoader) -> Void
     private let waitForChapterRetry: (Duration) async -> Void
+    /// いまアプリが裏か。テストから差し替える (シミュレータのホストの状態で成否が変わらないように)
+    private let appIsBackground: @MainActor () -> Bool
     private var chaseCloseTask: Task<Void, Never>?
     /// いまのストリームの段。続けられる今の接続 (再生中・一時停止中) があれば、選んだ段 (`selectedRung`) を試し、
     /// 採用したとき (200・再生できる形式・初期化と最初の映像の標本) にここへ移す。切り替えは試しを始めた位置から。
@@ -148,7 +150,8 @@ final class RecordingSession {
         nowPlaying: NowPlayingController = .shared,
         startStream: @escaping (StreamLoader) -> Void = { $0.start() },
         waitForChapterRetry: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) },
-        clock: @escaping () -> DispatchTime = { .now() }
+        clock: @escaping () -> DispatchTime = { .now() },
+        appIsBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background }
     ) {
         self.baseURL = baseURL
         self.token = token
@@ -162,6 +165,7 @@ final class RecordingSession {
         self.nowPlaying = nowPlaying
         self.startStream = startStream
         self.waitForChapterRetry = waitForChapterRetry
+        self.appIsBackground = appIsBackground
         self.policy = RecordingPlaybackPolicy(playable: playable)
         self.cmSkipEnabled = recording.cmReliable
         self.captionsOn = defaults.object(forKey: "captionsOn") as? Bool ?? true
@@ -1161,7 +1165,7 @@ final class RecordingSession {
         if state.videoFailed,
            !inBackground,
            state.videoEpoch == videoEpoch,
-           UIApplication.shared.applicationState != .background,
+           !appIsBackground(),
            !handledDecodeFailure {
             handledDecodeFailure = true
             if let codec = currentCodec ?? offer?.codec {
