@@ -436,17 +436,18 @@ final class RecordingSession {
         return true
     }
 
-    /// 決定・再生/一時停止ボタンと Now Playing の toggle は、同じ押下ならここへ 2 度来る。
-    /// 1 回押して止まってすぐ戻る、が起きないよう、間をあけずに来た 2 度目は捨てる
     @discardableResult
     func togglePlayCommand() -> Bool {
+        let shouldPause = isPlaying || (phase == .loading && !pendingPause)
+        return setPlayingFromCommand(!shouldPause)
+    }
+
+    /// 決定・再生/一時停止ボタンと Now Playing の play/pause/toggle で押下の控えを共有する。
+    private func setPlayingFromCommand(_ shouldPlay: Bool) -> Bool {
         guard !closed, stop == nil, !finished else { return false }
         // 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
         guard press.claim() else { return true }
-        if isPlaying || (phase == .loading && !pendingPause) {
-            return pause()
-        }
-        return play()
+        return shouldPlay ? play() : pause()
     }
 
     func togglePlay() {
@@ -674,8 +675,8 @@ final class RecordingSession {
                 position: position,
                 duration: scrubDuration
             ),
-            onPlay: { [weak self] in self?.play() ?? false },
-            onPause: { [weak self] in self?.pause() ?? false },
+            onPlay: { [weak self] in self?.setPlayingFromCommand(true) ?? false },
+            onPause: { [weak self] in self?.setPlayingFromCommand(false) ?? false },
             onToggle: { [weak self] in self?.togglePlayCommand() ?? false }
         )
     }
