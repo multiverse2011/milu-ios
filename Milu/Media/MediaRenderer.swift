@@ -78,6 +78,13 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
     /// 表へ戻った直後に GPU がまだ使えず flush を求められたとき、次の tick でやり直す印 (上限 VideoReplay.maxRetries 回)
     private var needsForegroundReplay = false
     private var foregroundReplayRetries = 0
+    /// デコードに回す前の映像 (届いた順 = デコードの順)。時計の `decodeAhead` 秒先までだけデコードする。
+    /// 表示の層に圧縮したまま先読みのぶん渡すと、デコードが遅れても層は遅れたまま映し続け、開き直すまで音とずれる
+    private var decodeQueue: [CMSampleBuffer] = []
+    private var decoder: VideoDecoder?
+    private var decodeLag = DecodeLag()
+    private var pumpTimer: DispatchSourceTimer?
+    private static let decodeAhead = 0.5
 
     @MainActor
     init(displayLayer: AVSampleBufferDisplayLayer, onState: @escaping @Sendable (RendererState) -> Void) {
@@ -89,15 +96,24 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
         audioReceiver = synchronizer.sampleBufferReceiver(adding: audioRenderer)
         audioRenderer.audioTimePitchAlgorithm = .timeDomain
         synchronizer.setRate(0, time: .zero)
+        decoder = VideoDecoder(
+            onFrame: { [weak self] in self?.present($0) },
+            onFailure: { [weak self] in self?.decodeFailed($0) }
+        )
+    }
+
+    deinit {
+        // cancel しない DispatchSource は持ち主が消えても動き続ける (stop を呼ばずに捨てられたとき)
+        timer?.cancel()
+        pumpTimer?.cancel()
     }
 
     /// 開くものを切り替える。前の映像と音声を捨てて、時刻と形式を読み直す
     func reset(live: Bool, from: Double, ruler: Bool, generation: Int) {
         MediaQueue.media.async { [self] in
             self.generation = generation
-            timer?.cancel()
-            timer = nil
-            videoReceiver?.flush()
+            stopTimers()
+            flushVideo()
             audioReceiver?.flush()
             synchronizer.setRate(0, time: .zero)
             tracks.removeAll()
@@ -131,10 +147,9 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
     func stop() {
         MediaQueue.media.async { [self] in
             stopped = true
-            timer?.cancel()
-            timer = nil
+            stopTimers()
             synchronizer.setRate(0, time: .zero)
-            videoReceiver?.flush()
+            flushVideo()
             audioReceiver?.flush()
             pendingVideo.removeAll()
             needsForegroundReplay = false
@@ -150,11 +165,10 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
     func pause() {
         MediaQueue.media.async { [self] in
             guard !stopped else { return }
-            timer?.cancel()
-            timer = nil
+            stopTimers()
             synchronizer.setRate(0, time: synchronizer.currentTime())
             audioReceiver?.flush()
-            videoReceiver?.flush()
+            flushVideo()
             pendingVideo.removeAll()
             needsForegroundReplay = false
             foregroundReplayRetries = 0
@@ -178,7 +192,7 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
             needsForegroundReplay = false
             foregroundReplayRetries = 0
             guard !stopped else { return }
-            videoReceiver?.flush()
+            flushVideo()
             let reported: Bool
             if enabled {
                 reported = replayPendingVideo()
@@ -396,35 +410,100 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
         return false
     }
 
-    /// 映像を渡す。止められたら次のキーフレームまで待つ (`false`)
+    /// 映像をデコードの列に積む。時計の少し先まで来たら `pump` がデコードに回す
     @discardableResult
     private func enqueueVideo(_ buffer: sending CMSampleBuffer) -> Bool {
-        guard let videoReceiver else { return false }
-        switch videoReceiver.enqueueImmediately(CMReadySampleBuffer<CMSampleBuffer.DynamicContent>(unsafeBuffer: buffer)) {
-        case .enqueued:
-            return true
+        decodeQueue.append(buffer)
+        pump()
+        return true
+    }
+
+    /// 時計の `decodeAhead` 秒先までの映像をデコードに回す。始まる前は始める位置から数える
+    private func pump() {
+        guard videoEnabled, !stopped, let decoder else { return }
+        let limit = (started ? synchronizer.currentTime().seconds : (startAt ?? 0)) + Self.decodeAhead
+        while let next = decodeQueue.first, Self.decodeTime(next) <= limit {
+            decodeQueue.removeFirst()
+            decoder.decode(next, display: !Self.flag(next, kCMSampleAttachmentKey_DoNotDisplay))
+        }
+    }
+
+    /// デコードしたコマを表示の層へ。表示の時刻を過ぎたものは映さず、遅れが続けば次のキーフレームへ飛ぶ (`DecodeLag`)
+    private func present(_ frame: sending CMSampleBuffer) {
+        guard !stopped, videoEnabled, let videoReceiver else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(frame).seconds
+        let duration = CMSampleBufferGetDuration(frame)
+        if started, synchronizer.rate > 0 {
+            let now = synchronizer.currentTime().seconds
+            switch decodeLag.frame(pts: pts, end: pts + (duration.isValid ? duration.seconds : 0), now: now) {
+            case .show:
+                break
+            case .drop:
+                return
+            case .skipToKeyframe:
+                Self.logger.info("video behind by \(now - pts, privacy: .public)s: skip to next keyframe")
+                restartDecodeAtKeyframe(after: now)
+                return
+            }
+        }
+        switch videoReceiver.enqueueImmediately(CMReadySampleBuffer<CMSampleBuffer.DynamicContent>(unsafeBuffer: frame)) {
+        case .enqueued, .cancelledDueToFlush:
+            break
         case .enqueuedWithDecodeFailures(let errors):
             let reason = errors.first?.localizedDescription ?? String(localized: "映像をデコードできません")
             videoFailed = true
             Self.logger.error("video decode failed: \(reason, privacy: .public)")
             report(message: reason, force: true)
-            return true
-        case .cancelledDueToFlush:
-            return true
         case .cancelledDueToFlushRequiredToResume(let error):
-            // デコーダが flush を求めている (裏へ回る境目など)。flush して次のキーフレームまで捨てる
-            videoReceiver.flush()
-            skipVideoUntilKeyframe = true
+            // 表示の層が flush を求めている (裏へ回る境目など)。次のキーフレームから映し直す
             Self.logger.info("flush required: \(error.localizedDescription, privacy: .public)")
-            return false
+            restartDecodeAtKeyframe(after: started ? synchronizer.currentTime().seconds : -.infinity)
         case .cancelledDueToError(let error):
             videoFailed = true
             Self.logger.error("video failed: \(error.localizedDescription, privacy: .public)")
             report(message: error.localizedDescription, force: true)
-            return false
         @unknown default:
-            return true
+            break
         }
+    }
+
+    private func decodeFailed(_ status: OSStatus) {
+        guard !stopped, videoEnabled else { return }
+        let reason = NSError(domain: NSOSStatusErrorDomain, code: Int(status)).localizedDescription
+        videoFailed = true
+        Self.logger.error("video decode failed: \(status, privacy: .public)")
+        report(message: reason, force: true)
+    }
+
+    /// デコードを捨て、`now` 以降の最初のキーフレームから始め直す。列に無ければ、次に届くキーフレームから
+    private func restartDecodeAtKeyframe(after now: Double) {
+        decoder?.flush()
+        videoReceiver?.flush()
+        decodeLag.reset()
+        while let first = decodeQueue.first,
+              Self.flag(first, kCMSampleAttachmentKey_NotSync)
+              || CMSampleBufferGetPresentationTimeStamp(first).seconds < now {
+            decodeQueue.removeFirst()
+        }
+        if decodeQueue.isEmpty { skipVideoUntilKeyframe = true }
+    }
+
+    /// 表示の層とデコードを空にする
+    private func flushVideo() {
+        decoder?.flush()
+        decodeQueue.removeAll()
+        decodeLag.reset()
+        videoReceiver?.flush()
+    }
+
+    private static func decodeTime(_ buffer: CMSampleBuffer) -> Double {
+        let dts = CMSampleBufferGetDecodeTimeStamp(buffer)
+        return (dts.isValid ? dts : CMSampleBufferGetPresentationTimeStamp(buffer)).seconds
+    }
+
+    /// `makeSampleBuffer` が付けた印
+    private static func flag(_ buffer: CMSampleBuffer, _ key: CFString) -> Bool {
+        (CMGetAttachment(buffer, key: key, attachmentModeOut: nil) as? Bool) == true
     }
 
     private func enqueueAudio(_ buffer: sending CMSampleBuffer) {
@@ -454,6 +533,18 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
         timer.setEventHandler { [weak self] in self?.tick() }
         timer.resume()
         self.timer = timer
+        let pumpTimer = DispatchSource.makeTimerSource(queue: MediaQueue.media)
+        pumpTimer.schedule(deadline: .now(), repeating: .milliseconds(20))
+        pumpTimer.setEventHandler { [weak self] in self?.pump() }
+        pumpTimer.resume()
+        self.pumpTimer = pumpTimer
+    }
+
+    private func stopTimers() {
+        timer?.cancel()
+        timer = nil
+        pumpTimer?.cancel()
+        pumpTimer = nil
     }
 
     private func tick() {
@@ -466,7 +557,7 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
             VideoReplay.trim(&pendingVideo, now: now) { sampleSeconds($0) }
         }
         if videoEnabled, needsForegroundReplay {
-            videoReceiver?.flush()
+            flushVideo()
             replayPendingVideo()
         }
         let ahead = lastVideoPTS - now
@@ -478,7 +569,7 @@ nonisolated final class MediaRenderer: @unchecked Sendable {
             // 4 秒を超えたら速さ 1.05 倍、10 秒を超えたら溜めたものを捨てて次のキーフレームから映し直す (3.2)
             switch CatchUp.action(ahead: ahead, rate: synchronizer.rate) {
             case .flushToKeyframe:
-                videoReceiver?.flush()
+                flushVideo()
                 audioReceiver?.flush()
                 pendingVideo.removeAll()
                 awaitingKeyframe = true
