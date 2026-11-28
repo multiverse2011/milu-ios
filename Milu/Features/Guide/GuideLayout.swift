@@ -11,6 +11,7 @@ nonisolated enum GuideLayout {
     static let tvPointsPerMinute = 4.6
     static let tvColumnWidth = 262.0
     static let tvColumnGap = 4.0
+    /// 時刻の列の幅 (字の大きさが既定のとき)。画面は字の大きさに合わせて広げる
     static let tvTimeWidth = 70.0
 
     /// 放送日の始まりの時刻 (時)。4:00 から翌 4:00 (日本のテレビの日付の決まり)
@@ -90,6 +91,16 @@ nonisolated enum GuideLayout {
         return min(max(x, lower), upper)
     }
 
+    /// 初期カーソルの列を表示するための横送り。番組がなければ左端のままにする。
+    static func tvInitialScrollX(column: Int?, visibleWidth: Double, columnCount: Int) -> Double {
+        guard let column else { return 0 }
+        let x = tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column, previous: nil, next: nil
+        )
+        let contentWidth = Double(columnCount) * (tvColumnWidth + tvColumnGap) - tvColumnGap
+        return min(max(0, x), max(0, contentWidth - visibleWidth))
+    }
+
     static func offset(
         of time: Double,
         from rangeStart: Double,
@@ -147,16 +158,18 @@ nonisolated enum GuideLayout {
     }
 
     /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
-    /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、時刻を優先する。
+    /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、見出しを優先する。
     static func tvFollowOffset(
         scrollY: Double, viewportHeight: Double, anchorY: Double, cell: ClosedRange<Double>?, headingHeight: Double
     ) -> Double {
         let margin = min(40, viewportHeight / 2)
         let y = min(max(scrollY, anchorY - viewportHeight + margin), anchorY - margin)
         guard let cell, headingHeight > 0, headingHeight <= viewportHeight else { return y }
-        let lower = max(anchorY, cell.lowerBound + headingHeight) - viewportHeight
-        let upper = min(anchorY, cell.upperBound - headingHeight)
-        guard lower <= upper else { return y }
+        let headingLower = cell.lowerBound + headingHeight - viewportHeight
+        let headingUpper = cell.upperBound - headingHeight
+        let lower = max(anchorY - viewportHeight, headingLower)
+        let upper = min(anchorY, headingUpper)
+        guard lower <= upper else { return min(max(y, headingLower), headingUpper) }
         return min(max(y, lower), upper)
     }
 

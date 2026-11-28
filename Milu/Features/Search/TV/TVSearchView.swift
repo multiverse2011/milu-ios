@@ -7,12 +7,6 @@ struct TVSearchView: View {
     @State private var model = SearchModel()
     /// 番組の詳細だけを持つ。再生はモデルの `openRequest` を見る
     @State private var program: GuideProgramItem?
-    @FocusState private var focus: Focus?
-
-    private enum Focus: Hashable {
-        case recording(Int64)
-        case program(Int64)
-    }
 
     /// 再生と番組の詳細は 1 つの cover で切り替える (TVRecordingsTabView と同じ決まり)
     private enum Cover: Identifiable {
@@ -29,12 +23,8 @@ struct TVSearchView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
-                TVTheme.background
-                    .ignoresSafeArea()
-                content
-            }
-            .searchable(text: query, prompt: Text("番組・録画を検索"))
+            content
+                .searchable(text: query, prompt: Text("番組・録画を検索"))
         }
         .task { await model.start(app) }
         .onDisappear { model.stop() }
@@ -56,7 +46,7 @@ struct TVSearchView: View {
                 }
             case .program(let item):
                 TVProgramView(item: item, model: model, onClose: { program = nil })
-                    .background(TVTheme.background)
+                    .background(.background)
             }
         }
     }
@@ -89,7 +79,9 @@ struct TVSearchView: View {
     @ViewBuilder
     private var content: some View {
         if model.trimmedQuery.isEmpty {
-            EmptyView()
+            // 検索語が空でも、標準の検索欄を載せる画面の領域を確保する。
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.load == .offline {
             TVOfflineView {
                 model.retry()
@@ -101,7 +93,6 @@ struct TVSearchView: View {
         } else {
             ProgressView()
                 .controlSize(.large)
-                .tint(.white)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -153,86 +144,77 @@ struct TVSearchView: View {
             }
             // 左の余白は TabView(.sidebarAdaptable) の安全領域に任せる (録画の一覧と同じ)
             .padding(.trailing, 40)
-            .padding(.top, 56)
+            // 上の余白は小さくする。結果の先頭へフォーカスが移ると tvOS が結果を上へ送り、
+            // 検索欄が左上の「検索」の札に潜り込む (カードの題名を絵の下へ移して縦に伸びたため)
+            // 余白はカードが伸びた分を詰める (旧 56 → 8 も、題を絵の下へ移したぶんを引いた値)。
+            // 今のカードは題 .title3 (行 53.9)・メタ .callout (行 37.0) で、旧 (題 34pt = 38.2・
+            // メタ 26pt = 31.0) より題 2 行で 37.4 伸びる。8 から引くと負なので 0 にする
+            // shortcut: 画面での測り直しは別途 (0 でも残る 29.4 は余白では詰められない)
+            .padding(.top, 0)
             .padding(.bottom, 60)
         }
     }
 
     private func heading(_ title: LocalizedStringKey) -> some View {
         Text(title)
-            .font(.system(size: 28))
-            .foregroundStyle(Color(white: 0.92).opacity(0.86))
+            .font(.body)
+            .foregroundStyle(.secondary)
     }
 
     private func moreNote(_ more: Bool) -> some View {
         Group {
             if more {
                 Text("ほかにもあります。言葉を足すと絞り込めます。")
-                    .font(.system(size: 24))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
     private func recordingCard(_ recording: SearchRecording) -> some View {
-        let isFocused = focus == .recording(recording.id)
-        return TVRecordingCard(
-            title: recording.name,
-            meta: SearchModel.tvRecordingSubtitle(recording),
-            poster: recording.posterPath,
-            unseen: false,
-            recording: recording.isRecording,
-            baseURL: app.server?.url,
-            token: app.server?.token,
-            isFocused: isFocused,
-            playable: recording.playable
-        )
-        .focusable(recording.playable)
-        .focusEffectDisabled()
-        .focused($focus, equals: .recording(recording.id))
-        .gesture(TapGesture().onEnded {
-            guard recording.playable else { return }
+        Button {
             Task { await model.openRecording(id: recording.id) }
-        })
+        } label: {
+            TVRecordingCard(
+                title: recording.name,
+                meta: SearchModel.tvRecordingSubtitle(recording),
+                poster: recording.posterPath,
+                unseen: false,
+                recording: recording.isRecording,
+                baseURL: app.server?.url,
+                token: app.server?.token,
+                playable: recording.playable
+            )
+        }
+        .buttonStyle(.borderless)
+        .disabled(!recording.playable)
         .accessibilityHint(Text(recording.playable ? "" : String(localized: "再生できません")))
     }
 
     private func programCard(_ program: SearchProgram) -> some View {
         let text = SearchModel.programRowText(program, now: Date())
-        let isFocused = focus == .program(program.id)
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("\(text.day) \(text.time) · \(program.serviceName)")
-                .font(.system(size: 24))
-                .foregroundStyle(TVTheme.muted)
-            Text(program.name)
-                .font(DenpaFont.font(size: 30))
-                .fontWeight(.bold)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            if let state = text.state {
-                Text(state.text())
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(state == .onAir ? TVTheme.record : Color.accentColor)
+        return Button {
+            self.program = model.programItem(program)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(text.day) \(text.time) · \(program.serviceName)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(program.name)
+                    .font(DenpaFont.font(.body))
+                    .fontWeight(.bold)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if let state = text.state {
+                    Text(state.text())
+                        .font(.callout.bold())
+                        .foregroundStyle(state == .onAir ? TVTheme.record : Color.accentColor)
+                }
             }
+            .padding(22)
+            .frame(width: 520, alignment: .leading)
         }
-        .padding(22)
-        .frame(width: 520, alignment: .leading)
-        .background(
-            isFocused ? Color.white.opacity(0.14) : Color.white.opacity(0.06),
-            in: RoundedRectangle(cornerRadius: 18)
-        )
-        .overlay {
-            if isFocused {
-                RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(Color.accentColor, lineWidth: 5)
-            }
-        }
-        .scaleEffect(isFocused ? 1.04 : 1)
-        .animation(.easeOut(duration: 0.15), value: isFocused)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($focus, equals: .program(program.id))
-        .gesture(TapGesture().onEnded { self.program = model.programItem(program) })
+        .buttonStyle(.card)
     }
 
 }

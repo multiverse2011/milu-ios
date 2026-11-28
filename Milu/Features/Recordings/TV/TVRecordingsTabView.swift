@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// tvOS の録画のタブ (TV-Recordings・TV-RecordingsEmpty)。上に焦点の当たっている録画の大きな情報と背景、
-/// 下に日付ごとのカードの列。決定の長押しで詳細 (TV-RecordingDetail)。
+/// 下に日付ごとのカードの列。決定の長押しでメニューを出し、「詳細」で詳細 (TV-RecordingDetail)。
 struct TVRecordingsTabView: View {
     /// 録画がまだ無いときの「ライブへ」
     var onGoLive: () -> Void = {}
@@ -9,6 +9,9 @@ struct TVRecordingsTabView: View {
     @Environment(AppModel.self) private var app
     @State private var model = RecordingsModel()
     @FocusState private var focused: Int64?
+    /// 長押しメニューにフォーカスが移っている間は `focused` が nil になる。上部の情報と、詳細を
+    /// 閉じたときの戻り先に使う「最後にフォーカスした録画」
+    @State private var lastFocused: Int64?
     @State private var cover: Cover?
     @State private var alertMessage: String?
 
@@ -27,27 +30,32 @@ struct TVRecordingsTabView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            background
-            content
-        }
+        content
         .task { await model.start(app) }
         .onDisappear { model.stop() }
-        .fullScreenCover(item: $cover) { cover in
+        .onChange(of: focused) { _, id in
+            if let id { lastFocused = id }
+        }
+        .fullScreenCover(item: $cover, onDismiss: restoreFocus) { cover in
             switch cover {
             case .detail(let recording):
                 TVRecordingDetailView(
                     recording: recording,
                     onPlay: { from in open(recording, from: from) },
                     onDelete: {
+                        // 消える録画へフォーカスを戻さない。先に手放し、消せなかったら delete で戻す
+                        forget(recording.id)
                         self.cover = nil
                         Task { await delete(recording) }
                     },
                     onClose: { self.cover = nil }
                 )
-                .background(TVTheme.background)
+                .background(.background)
             case .watch(let request):
-                TVRecordingPlayerView(session: request.session) {
+                TVRecordingPlayerView(
+                    session: request.session,
+                    onDeleted: { forget(request.session.recording.id) }
+                ) {
                     self.cover = nil
                     Task { await model.refreshFromEvents() }
                 }
@@ -116,9 +124,9 @@ struct TVRecordingsTabView: View {
                 // 字の間は画面案の全角の空き。文言そのものには入れない (訳す鍵を汚さない)
                 HStack(spacing: 14) {
                     Text("録画")
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(.secondary)
                         .fontWeight(.semibold)
-                    Text("長押しで詳細 (説明・削除)")
+                    Text("長押しでメニューから詳細")
                     HStack(spacing: 8) {
                         Circle()
                             .fill(Color.accentColor)
@@ -127,26 +135,26 @@ struct TVRecordingsTabView: View {
                     }
                     .padding(.leading, 8)
                 }
-                .font(.system(size: 26))
-                .foregroundStyle(TVTheme.muted)
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
                 HStack(spacing: 16) {
                     unseenDot(recording, size: 24)
                     Text(recording.title)
-                        .font(DenpaFont.font(size: 56))
+                        .font(DenpaFont.font(.title))
                         .fontWeight(.bold)
                         .lineLimit(2)
                 }
                 Text(metaLine(recording))
-                    .font(.system(size: 30))
-                    .foregroundStyle(Color(white: 0.92).opacity(0.86))
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
                 if recording.recording {
                     Text("● 録画中")
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.callout.bold())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
-                        .background(.red, in: RoundedRectangle(cornerRadius: 8))
+                        .background(TVTheme.record, in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding(.bottom, 6)
@@ -157,15 +165,15 @@ struct TVRecordingsTabView: View {
         VStack(spacing: 16) {
             Image(systemName: "play.rectangle")
                 .font(.system(size: 110, weight: .light))
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Text("録画はまだありません")
-                .font(.system(size: 48, weight: .bold))
+                .font(.title.bold())
                 .padding(.top, 10)
             Text("番組表で番組を予約すると、録れたものがここに並びます。")
-                .font(.system(size: 30))
-                .foregroundStyle(TVTheme.muted)
+                .font(.title3)
+                .foregroundStyle(.secondary)
             Button("ライブへ", action: onGoLive)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .padding(.top, 30)
         }
@@ -177,36 +185,34 @@ struct TVRecordingsTabView: View {
         return HStack(spacing: 6) {
             Text(heading.primary)
             Text(heading.secondary)
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
         }
-        .font(.system(size: 28))
-        .foregroundStyle(Color(white: 0.92).opacity(0.86))
+        .font(.body)
+        .foregroundStyle(.secondary)
     }
 
     // MARK: - カード
 
     private func card(_ recording: Recording) -> some View {
-        let isFocused = focused == recording.id
-        // Button にすると焦点の当たっていないカードの字が薄く沈む。絵では並んだカードも読めるので、
-        // フォーカスできる面にして、決定と長押しをジェスチャで受ける
-        return TVRecordingCard(
-            title: recording.title,
-            meta: cardMeta(recording),
-            poster: recording.poster,
-            unseen: unseen(recording),
-            recording: recording.recording,
-            baseURL: app.server?.url,
-            token: app.server?.token,
-            isFocused: isFocused
-        )
-        .focusable()
-        .focusEffectDisabled()
+        // 浮き上がり・影は tvOS の標準のボタンと hoverEffect に任せ、決定で再生・長押しでメニューを出す
+        return Button {
+            open(recording, from: nil)
+        } label: {
+            TVRecordingCard(
+                title: recording.title,
+                meta: cardMeta(recording),
+                poster: recording.poster,
+                unseen: unseen(recording),
+                recording: recording.recording,
+                baseURL: app.server?.url,
+                token: app.server?.token
+            )
+        }
+        .buttonStyle(.borderless)
         .focused($focused, equals: recording.id)
-        .gesture(
-            LongPressGesture(minimumDuration: 0.6)
-                .onEnded { _ in cover = .detail(recording) }
-                .exclusively(before: TapGesture().onEnded { open(recording, from: nil) })
-        )
+        .contextMenu {
+            Button("詳細") { cover = .detail(recording) }
+        }
         .onAppear {
             Task { await model.loadMoreIfNeeded(current: recording) }
         }
@@ -239,22 +245,27 @@ struct TVRecordingsTabView: View {
     // MARK: - 決まり
 
     private var hero: Recording? {
-        model.visible.first { $0.id == focused } ?? model.visible.first
+        // ふだんはフォーカスに直接合わせ、メニューで nil の間だけ最後にフォーカスした録画にする
+        let id = focused ?? lastFocused
+        return model.visible.first { $0.id == id } ?? model.visible.first
     }
 
-    /// 絵の右上の暖かい光
-    private var background: some View {
-        ZStack {
-            TVTheme.background
-            RadialGradient(
-                colors: [Color(red: 0.91, green: 0.71, blue: 0.56).opacity(0.45), .clear],
-                center: .topTrailing,
-                startRadius: 60,
-                endRadius: 900
-            )
-            .blur(radius: 40)
+    /// 長押しメニューから詳細を開くと、閉じたときに焦点が既定の先頭へ落ちる。最後にフォーカスした
+    /// カードへ戻す。消えた録画なら何もしない (先頭に任せる)。閉じた直後はフォーカスエンジンが
+    /// 先頭へ戻すので 1 拍遅らせる (TVLiveTabView・TVLivePlayerView と同じ)
+    private func restoreFocus() {
+        guard let id = lastFocused else { return }
+        guard model.visible.contains(where: { $0.id == id }) else {
+            lastFocused = nil
+            return
         }
-        .ignoresSafeArea()
+        Task { focused = id }
+    }
+
+    /// 消えた録画へは戻らない。焦点も外す (先頭は tvOS の既定に任せる)
+    private func forget(_ id: Int64) {
+        if lastFocused == id { lastFocused = nil }
+        if focused == id { focused = nil }
     }
 
     private func open(_ recording: Recording, from: Double?) {
@@ -274,12 +285,16 @@ struct TVRecordingsTabView: View {
     private func delete(_ recording: Recording) async {
         if let message = await model.delete(recording) {
             alertMessage = message
+            // 消せなかったので元のカードへ戻す (閉じた直後の既定のフォーカスに上書きされないよう遅らせる)
+            Task { focused = recording.id }
+            return
         }
+        forget(recording.id)
     }
 }
 
 /// 録画のカード (TV-Recordings)。検索のカードも同じ部品を使う (D31)。
-/// フォーカスの束ね方 (`.focusable()` と `.focused`) は呼び手が持つ。
+/// 押せる面 (Button) とフォーカスは呼び手が持つ。
 struct TVRecordingCard: View {
     let title: String
     let meta: String
@@ -288,13 +303,12 @@ struct TVRecordingCard: View {
     let recording: Bool
     let baseURL: URL?
     let token: String?
-    let isFocused: Bool
     /// 観られない録画は押せない見た目にする
     var playable = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ZStack(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .topLeading) {
                 TVPosterImage(
                     poster: poster,
                     baseURL: baseURL,
@@ -302,61 +316,38 @@ struct TVRecordingCard: View {
                     width: 510,
                     height: 287
                 )
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 16, height: 16)
-                        .opacity(unseen ? 1 : 0)
-                    Text(title)
-                        .font(DenpaFont.font(size: 34))
-                        .fontWeight(.bold)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 70)
-                .padding(.bottom, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // 番組名の行数に合わせて敷く。上に 70pt 空けた帯にし、2 行のとき上段も暗くする
-                // (高さ 70pt 固定だと上段が外へ出る)
-                .background(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: .black.opacity(0.55), location: 0.4),
-                            .init(color: .black.opacity(0.88), location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
                 if recording {
                     Text("● 録画中")
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.caption.bold())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
-                        .background(.red, in: RoundedRectangle(cornerRadius: 8))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .background(TVTheme.record, in: RoundedRectangle(cornerRadius: 8))
                         .padding(14)
                 }
             }
             .frame(width: 510, height: 287)
             .clipShape(RoundedRectangle(cornerRadius: 20))
-            .overlay {
-                if isFocused {
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(Color.accentColor, lineWidth: 5)
-                }
+            // 浮き上がりと光沢は tvOS の標準の効果に任せる (純正の TV アプリの並び)。札も絵と一緒に動かす
+            .hoverEffect(.highlight)
+
+            // 番組名とメタ情報は絵の下 (純正の TV アプリの並べ方)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 16, height: 16)
+                    .opacity(unseen ? 1 : 0)
+                Text(title)
+                    .font(DenpaFont.font(.title3))
+                    .fontWeight(.bold)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
             Text(meta)
-                .font(.system(size: 26))
-                .foregroundStyle(TVTheme.muted)
-                .padding(.leading, 4)
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
-        .scaleEffect(isFocused ? 1.08 : 1)
-        .animation(.easeOut(duration: 0.15), value: isFocused)
-        .contentShape(Rectangle())
+        .frame(width: 510, alignment: .leading)
         .opacity(playable ? 1 : 0.45)
     }
 }
@@ -384,11 +375,7 @@ struct TVPosterImage: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                LinearGradient(
-                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.05)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                Rectangle().fill(.quaternary)
             }
         }
         .frame(width: width, height: height)
@@ -430,15 +417,15 @@ struct TVOfflineView: View {
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 96, weight: .light))
-                .foregroundStyle(TVTheme.muted)
+                .foregroundStyle(.secondary)
             Text("denpa に接続できません")
-                .font(.system(size: 40, weight: .bold))
+                .font(.title2.bold())
                 .padding(.top, 8)
             Text("Wi-Fi などの接続状況を確認してください。")
-                .font(.system(size: 28))
-                .foregroundStyle(TVTheme.muted)
+                .font(.body)
+                .foregroundStyle(.secondary)
             Button("再試行", action: retry)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .padding(.top, 24)
         }

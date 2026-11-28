@@ -3,7 +3,6 @@ import SwiftUI
 /// tvOS の繋ぐ画面 (TV-Connect)。絵に無い失敗の行は iPhone と同じ場所に出す。
 struct TVConnectView: View {
     @Environment(AppModel.self) private var model
-    @FocusState private var addressFocused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -15,36 +14,24 @@ struct TVConnectView: View {
                     .frame(width: 130, height: 130)
                     .clipShape(RoundedRectangle(cornerRadius: 30))
                 Text("denpa に繋ぐ")
-                    .font(.system(size: 64, weight: .bold))
+                    .font(.largeTitle.bold())
                     .padding(.top, 4)
                 Text("家の denpa の Web 画面を開くときのアドレスを入れてください。\niPhone のキーボードからも打てます。")
-                    .font(.system(size: 30))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(6)
 
+                // 地・枠・拡大は tvOS の TextField の既定の見た目に任せる
                 HStack(spacing: 24) {
                     Text("アドレス")
+                        .font(.title3)
                         .fontWeight(.medium)
-                        .foregroundStyle(TVTheme.fieldLabel)
                     TextField("denpa.lan", text: $model.address)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 34, weight: .semibold))
-                        .focused($addressFocused)
-                        .focusEffectDisabled()
+                        .font(.title3)
+                        .fontWeight(.semibold)
                         .onSubmit { connect() }
                 }
-                .foregroundStyle(TVTheme.ink)
-                .padding(.horizontal, 34)
-                .frame(height: 96)
-                .background(TVTheme.light, in: RoundedRectangle(cornerRadius: 20))
-                .overlay {
-                    if addressFocused {
-                        RoundedRectangle(cornerRadius: 20)
-                            .strokeBorder(Color.accentColor, lineWidth: 5)
-                    }
-                }
-                .scaleEffect(addressFocused ? 1.03 : 1)
                 .padding(.top, 22)
 
                 Group {
@@ -53,10 +40,10 @@ struct TVConnectView: View {
                             .foregroundStyle(.orange)
                     } else {
                         Text("例: denpa.lan、192.168.1.20:3000")
-                            .foregroundStyle(TVTheme.muted)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .font(.system(size: 24))
+                .font(.callout)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 34)
 
@@ -69,10 +56,9 @@ struct TVConnectView: View {
                             Text("繋ぐ")
                         }
                     }
-                    .font(.system(size: 32, weight: .semibold))
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .disabled(model.isConnecting)
                 .padding(.top, 8)
@@ -82,8 +68,8 @@ struct TVConnectView: View {
             .padding(.top, 190)
 
             Text("Milu は denpa の非公式クライアントです。")
-                .font(.system(size: 24))
-                .foregroundStyle(TVTheme.muted)
+                .font(.callout)
+                .foregroundStyle(.secondary)
                 .padding(.bottom, 60)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

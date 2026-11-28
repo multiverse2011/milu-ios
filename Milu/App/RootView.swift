@@ -29,10 +29,23 @@ struct RootView: View {
             }
             #endif
         }
-        .tint(Color.accentColor)
+        .appTint()
         .preferredColorScheme(.dark)
         .onChange(of: scenePhase, initial: true) { _, phase in
             model.setActive(phase == .active)
         }
+    }
+}
+
+private extension View {
+    /// 押せる物の tint。tvOS は tint を付けるとフォーカス時の地と字の両方に効き、
+    /// 白地に白字になりうるので付けない (標準のボタンの白地・黒字に任せる)。
+    /// 意味のある印は各画面が Color.accentColor を直に指定して残す
+    @ViewBuilder func appTint() -> some View {
+        #if os(tvOS)
+        self
+        #else
+        self.tint(Color.accentColor)
+        #endif
     }
 }

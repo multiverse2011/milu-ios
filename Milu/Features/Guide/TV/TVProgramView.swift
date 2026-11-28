@@ -33,7 +33,7 @@ struct TVProgramView: View {
             VStack(alignment: .leading, spacing: 0) {
                 headerRow
                 Text(item.name)
-                    .font(DenpaFont.font(size: 60))
+                    .font(DenpaFont.font(.title))
                     .bold()
                     .lineSpacing(4)
                     .padding(.top, 16)
@@ -48,16 +48,16 @@ struct TVProgramView: View {
                     .padding(.top, 36)
                 if let status = statusLine {
                     Text(status.text)
-                        .font(.system(size: 26))
+                        .font(.callout)
                         .foregroundStyle(status.color)
                         .padding(.top, 22)
                 }
                 if let description = detail?.description ?? item.description, !description.isEmpty {
                     TVReadingText(
-                        text: description, font: DenpaFont.font(size: 30),
+                        text: description, font: DenpaFont.font(.body),
                         lineSpacing: 12, scalesWithTextSize: true
                     )
-                        .foregroundStyle(TVTheme.body)
+                        .foregroundStyle(.primary)
                         .padding(.top, 36)
                         .frame(maxWidth: 1340, alignment: .leading)
                 }
@@ -65,13 +65,11 @@ struct TVProgramView: View {
                     .padding(.top, 28)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 140)
-            .padding(.trailing, 140)
             .padding(.top, 50)
             .padding(.bottom, Self.bottomPadding)
         }
         .tvContinueHint(bottomPadding: Self.bottomPadding)
-        .background(TVTheme.background)
+        .background(.background)
         .task {
             detail = await model.detail(item)
         }
@@ -104,8 +102,8 @@ struct TVProgramView: View {
         HStack(spacing: 16) {
             ChannelLogoView(path: item.logo, serviceName: item.serviceName, width: 70, height: 40)
             Text(headerText)
-                .font(.system(size: 28))
-                .foregroundStyle(TVTheme.body)
+                .font(.body)
+                .foregroundStyle(.primary)
         }
     }
 
@@ -154,9 +152,9 @@ struct TVProgramView: View {
     private var progressBar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.22))
+                Capsule().fill(.quaternary)
                 Capsule()
-                    .fill(Color.accentColor)
+                    .fill(.primary)
                     .frame(width: geo.size.width * progress)
             }
         }
@@ -164,8 +162,8 @@ struct TVProgramView: View {
     }
 
     /// 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 主要な操作 (ライブで観る・予約) = prominent、録画 = 録画の赤の tint、
-    /// 予約の取り消し・録画の停止 = role、閉じる = bordered
+    /// 押せる物は bordered に揃えて tint で塗らない。録画中かは字 (● 録画中) で示し、
+    /// 予約の取り消し・録画の停止 = role
     private var buttons: some View {
         HStack(spacing: 20) {
             ForEach(Array(actions.buttons.enumerated()), id: \.offset) { index, button in
@@ -176,7 +174,6 @@ struct TVProgramView: View {
                 .buttonStyle(.bordered)
                 .focused($focusedButton, equals: actions.buttons.count)
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .defaultFocus($focusedButton, 0)
         // 予約→予約取消、録画する→録画中で枝が入れ替わるとフォーカスが外れるので、
@@ -210,11 +207,10 @@ struct TVProgramView: View {
         switch button {
         case .reserve, .watchLive:
             Button(label(for: button)) { perform(button, index: index) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
         case .record:
             Button(label(for: button)) { perform(button, index: index) }
                 .buttonStyle(.bordered)
-                .tint(TVTheme.record)
         case .cancelReservation, .recordingNow:
             Button(label(for: button), role: .destructive) { perform(button, index: index) }
                 .buttonStyle(.bordered)
@@ -226,13 +222,13 @@ struct TVProgramView: View {
         ForEach(Array(otherSections.enumerated()), id: \.offset) { _, entry in
             VStack(alignment: .leading, spacing: 6) {
                 Text(GuideText.extendedHeading(entry.heading))
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(TVTheme.body)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
                 TVReadingText(
-                    text: entry.body, font: DenpaFont.font(size: 30),
+                    text: entry.body, font: DenpaFont.font(.body),
                     lineSpacing: 12, scalesWithTextSize: true
                 )
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
             }
             .frame(maxWidth: 1340, alignment: .leading)
             .padding(.top, 20)
@@ -268,7 +264,7 @@ struct TVProgramView: View {
             case .conflict(let reason):
                 return reason.isEmpty ? nil : (reason, .orange)
             case .reason(let text):
-                return text.isEmpty ? nil : (text, TVTheme.muted)
+                return text.isEmpty ? nil : (text, Color.secondary)
             case .onAir, .reserved:
                 continue
             }
@@ -291,7 +287,7 @@ struct TVProgramView: View {
     }
 
     private var genreColor: Color {
-        guard let rgba = GenreColor.color(item.genre) else { return TVTheme.muted }
+        guard let rgba = GenreColor.color(item.genre) else { return .secondary }
         return Color(.sRGB, red: Double(rgba.r) / 255, green: Double(rgba.g) / 255, blue: Double(rgba.b) / 255)
     }
 
@@ -348,17 +344,18 @@ struct TVProgramView: View {
 
 /// 詳細の札 (状態・ジャンル)。画面案の丸い角 8 の面
 private struct TVPill<Content: View>: View {
-    var background: Color = .white.opacity(0.1)
-    var foreground: Color = .white
+    var background: Color?
+    var foreground: Color = .primary
     var bold = false
     @ViewBuilder var content: Content
 
     var body: some View {
         content
-            .font(.system(size: 24, weight: bold ? .bold : .regular))
+            .font(.callout.weight(bold ? .bold : .regular))
             .foregroundStyle(foreground)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(background, in: RoundedRectangle(cornerRadius: 8))
+            .frame(minHeight: 44)
+            .background(background.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.quaternary), in: RoundedRectangle(cornerRadius: 8))
     }
 }

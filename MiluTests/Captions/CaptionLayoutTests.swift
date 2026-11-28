@@ -23,6 +23,18 @@ struct CaptionLayoutTests {
         #expect(CaptionLayout.scaleX(planeWidth: 960, frameWidth: 390) == 390.0 / 960.0)
     }
 
+    @Test func captionLiftUsesTheFullVideoFrame() {
+        let videoFrame = CGRect(x: 0, y: 20, width: 1920, height: 1080)
+        // 安全領域の上下の余白は各 60pt。操作の列は安全領域の下端から 355pt。
+        let controlsTop = videoFrame.maxY - 60 - 355
+        #expect(CaptionLayout.liftAboveControls(
+            normalizedBottom: 0.9, videoFrame: videoFrame, controlsTop: controlsTop
+        ) == 323)
+        #expect(CaptionLayout.liftAboveControls(
+            normalizedBottom: 0.5, videoFrame: videoFrame, controlsTop: controlsTop
+        ) == 0)
+    }
+
     @Test func cellCountFollowsCodePoints() {
         // 区画の数は text のコードポイントの数
         #expect(CaptionLayout.cellCount(of: run) == 4)

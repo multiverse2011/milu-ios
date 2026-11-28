@@ -93,11 +93,18 @@ struct GuideLayoutTests {
         #expect(offset == 1992)
     }
 
-    @Test func tvFollowPreservesTheAnchorWhenTheCellIsTooFarAway() {
+    @Test func tvFollowShowsTheHeadingWhenTheProgramIsFarAboveTheAnchor() {
         let offset = GuideLayout.tvFollowOffset(
             scrollY: 1000, viewportHeight: 700, anchorY: 1950, cell: 100...550, headingHeight: 88
         )
-        #expect(offset == 1290)
+        #expect(offset == 462)
+    }
+
+    @Test func tvFollowShowsTheHeadingAfterAMorningBroadcastGap() {
+        let offset = GuideLayout.tvFollowOffset(
+            scrollY: 0, viewportHeight: 700, anchorY: 414, cell: 1104...1380, headingHeight: 88
+        )
+        #expect(offset == 492)
     }
 
     @Test func columns() {

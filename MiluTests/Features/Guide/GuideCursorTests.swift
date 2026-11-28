@@ -47,6 +47,22 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.initial(in: [], now: 0) == nil)
     }
 
+    @Test(arguments: [7, 9])
+    func initialScrollShowsTheFirstProgramPastEmptyColumns(emptyCount: Int) throws {
+        let hour: Int64 = 3_600_000
+        var stations = (0..<emptyCount).map { service(Int64($0), []) }
+        stations.append(service(Int64(emptyCount), [(id: 1, start: 10 * hour, end: 11 * hour)]))
+
+        let cursor = try #require(GuideCursorMotion.initial(in: stations, now: 10 * hour))
+        #expect(cursor.column == emptyCount)
+        let viewportWidth = 1920.0
+        let visibleWidth = viewportWidth - GuideLayout.tvTimeWidth
+        let x = GuideLayout.tvInitialScrollX(column: cursor.column, visibleWidth: visibleWidth, columnCount: stations.count)
+        let range = GuideLayout.tvColumnFocusRange(cursor.column, scrollX: x, visibleWidth: visibleWidth)
+        #expect(range.map { $0.upperBound - $0.lowerBound } == GuideLayout.tvColumnWidth)
+        #expect(GuideLayout.tvColumnRange(scrollX: x, width: viewportWidth, count: stations.count).contains(cursor.column))
+    }
+
     @Test func cursorCanSitOnTheProgramOnAir() {
         // 21:58、局 A は 20:00–22:00 が放送中、その下が 22:00–23:00。局 B は 21:00–23:00 が放送中
         let hour: Int64 = 3_600_000

@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import UIKit
 
 /// 番組表の画面に出す字句 (3.5・画面案)。純粋な関数だけを置く。
 nonisolated enum GuideText {
@@ -100,13 +102,15 @@ nonisolated enum GuideText {
     }
 
     static let tvCellVerticalPadding = 10.0
-    private static let tvTitleLineHeight = 34.0
 
-    /// tvOS のマスに入る行の数 (TV-Guide)。題は 25pt・行 34pt、説明は 21pt・行 30pt、上下の余白 20pt、行の間 4pt。
+    /// tvOS のマスに入る行の数 (TV-Guide)。題は .callout、説明は .caption。行の高さは画面と同じ
+    /// 実フォント (DenpaFont) から取り、文字の大きさの設定にも追従する。上下の余白 20pt、行の間 4pt。
     /// iPhone/iPad と違い、予約の印は題の行に並べるので、印のぶんの行は取らない。
-    static func tvCellLines(height: Double, textScale: Double = 1) -> (title: Int, description: Int) {
-        let titleLine = tvTitleLineHeight * textScale
-        let detailLine = 30 * textScale
+    static func tvCellLines(height: Double, dynamicTypeSize: DynamicTypeSize = .large) -> (title: Int, description: Int) {
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
+        // 端数のまま足すとマスの境目で 1 行ぶんはみ出しうるので、見積りは切り上げる
+        let titleLine = tvCellTitleLineHeight(traits: traits)
+        let detailLine = Double(DenpaFont.lineHeight(of: .caption, traits: traits).rounded(.up))
         let spacing = 4.0
         let available = height - 2 * tvCellVerticalPadding
         guard available >= titleLine else { return (0, 0) }
@@ -118,9 +122,14 @@ nonisolated enum GuideText {
         return (titleLines, description)
     }
 
-    static func tvCellHeadingHeight(titleLines: Int, textScale: Double) -> Double {
+    static func tvCellHeadingHeight(titleLines: Int, dynamicTypeSize: DynamicTypeSize) -> Double {
         guard titleLines > 0 else { return 0 }
-        return 2 * tvCellVerticalPadding + Double(titleLines) * tvTitleLineHeight * textScale
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize))
+        return 2 * tvCellVerticalPadding + Double(titleLines) * tvCellTitleLineHeight(traits: traits)
+    }
+
+    private static func tvCellTitleLineHeight(traits: UITraitCollection) -> Double {
+        Double(DenpaFont.lineHeight(of: .callout, traits: traits).rounded(.up))
     }
 }
 

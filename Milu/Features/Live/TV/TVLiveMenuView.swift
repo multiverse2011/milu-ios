@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// ライブのメニュー (TV-Live)。映像の上に、いまの局・操作の列・種別ごとの局の列を出す。
-/// リモコンの 下・決定で開き、上でいまの局にフォーカスする (3.5.1)。
+/// リモコンの 下・上で開き、上でいまの局にフォーカスする (3.5.1)。
 /// tvOS ではタブの根でもこれを出し、映像を観ていないときの局一覧にする。
 struct TVLiveMenuView: View {
     let model: LiveModel
@@ -75,8 +75,8 @@ struct TVLiveMenuView: View {
         let session = model.session
         return HStack(spacing: 18) {
             Text("画質")
-                .font(.system(size: 22))
-                .foregroundStyle(TVTheme.muted)
+                .font(.callout)
+                .foregroundStyle(.secondary)
             ForEach(Array((session?.qualityItems ?? []).enumerated()), id: \.offset) { index, item in
                 chip(
                     TVLiveText.qualityItemTitle(item, session: session),
@@ -88,8 +88,8 @@ struct TVLiveMenuView: View {
             }
             if session?.rungItems.isEmpty == false {
                 Text("解像度")
-                    .font(.system(size: 22))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             ForEach(session?.rungItems ?? [], id: \.rung) { item in
                 chip(
@@ -131,13 +131,13 @@ struct TVLiveMenuView: View {
                 }
             }
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
     }
 
-    /// 操作の列の 1 つ。選択中・録画中は字 (✓・● 録画中) で示す。フォーカス中の
-    /// bordered も地が tint になるので、地の色だけで選択を表すと見分けられない。
+    /// 操作の列の 1 つ。選択中・録画中は字 (✓・● 録画中) で示す。
+    /// tint は付けず、フォーカスの地と字は tvOS 標準の白地・黒字に任せる
+    /// (tint はフォーカス時の地と字の両方に効き、白地に白字になりうる)。
     /// 札の形を状態で切り替えると、押した直後にフォーカスが隣の札へ移るため、
     /// スタイルは bordered の 1 つに固定する (#75)
     private func chip(
@@ -150,7 +150,6 @@ struct TVLiveMenuView: View {
         let marked = selected && !recording ? "✓ \(title)" : title
         return Button(marked, action: action)
             .buttonStyle(.bordered)
-            .tint(recording ? TVTheme.record : Color.accentColor)
             .focused($focus, equals: value)
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -160,20 +159,23 @@ struct TVLiveMenuView: View {
     private func section(_ type: ServiceType) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(type.title)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(TVTheme.body)
+                .font(.headline)
+                .foregroundStyle(.primary)
                 .padding(.top, 24)
                 .padding(.leading, 4)
             ScrollView(.horizontal) {
-                HStack(spacing: 26) {
-                    ForEach(model.services.filter { $0.type == type }, id: \.id) { service in
-                        stationCard(service)
+                // 一番高いカードに行の高さを揃え、各カードはその高さまで広げる。
+                Grid(alignment: .topLeading, horizontalSpacing: 26) {
+                    GridRow {
+                        ForEach(model.services.filter { $0.type == type }, id: \.id) { service in
+                            stationCard(service)
+                        }
                     }
                 }
                 .padding(.vertical, 16)
                 .padding(.horizontal, 4)
             }
-            // 先頭・末尾のカードのフォーカス枠と拡大が横の端で切れないようにする (#71。
+            // 先頭・末尾のカードの、標準のフォーカスの浮き上がりと影が横の端で切れないようにする (#71。
             // 録画・検索の横の列と同じ作り)
             .scrollClipDisabled()
             .focusSection()
@@ -181,7 +183,6 @@ struct TVLiveMenuView: View {
     }
 
     private func stationCard(_ service: Service) -> some View {
-        let isFocused = focus == .station(service.id)
         let isCurrent = service.id == model.current?.id
         return Button {
             onSelect(service)
@@ -190,51 +191,43 @@ struct TVLiveMenuView: View {
                 HStack(spacing: 14) {
                     if let key = service.remoteControlKey {
                         Text("\(key)")
-                            .font(.system(size: 24))
-                            .foregroundStyle(TVTheme.muted)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                             .frame(width: 18, alignment: .leading)
                     }
                     TVServiceLogo(service: service, baseURL: baseURL, token: token)
                     Spacer(minLength: 8)
                     marks(service)
-                    if isCurrent, model.isPlaybackOpen {
-                        Text("視聴中")
-                            .font(.system(size: 21, weight: .bold))
-                            .foregroundStyle(TVTheme.ink)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                    if isCurrent {
+                        if model.isPlaybackOpen {
+                            Text("視聴中")
+                                .font(.caption.bold())
+                                .foregroundStyle(Color.accentColor)
+                        } else {
+                            // 枠の代わりの印。再生していない間は「いま選んである局」だけを示す
+                            Image(systemName: "play.tv.fill")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(Color.accentColor)
+                                .accessibilityLabel(Text("いま選んでいる局"))
+                        }
                     }
                 }
                 Text(service.name)
-                    .font(DenpaFont.font(size: 32))
+                    .font(DenpaFont.font(.title3))
                     .fontWeight(.bold)
                     .lineLimit(1)
                 Text(service.now?.title ?? "")
-                    .font(DenpaFont.font(size: 25))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(DenpaFont.font(.callout))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
-            .frame(width: 440, height: 180, alignment: .topLeading)
-            .background(
-                isCurrent ? Color.accentColor.opacity(0.16) : Color.white.opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 20)
-            )
-            .overlay {
-                if isCurrent || isFocused {
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(
-                            Color.accentColor.opacity(isFocused ? 1 : 0.6),
-                            lineWidth: isFocused ? 5 : 2
-                        )
-                }
-            }
-            .scaleEffect(isFocused ? 1.06 : 1)
+            .frame(width: 440, alignment: .leading)
+            .frame(minHeight: 200, maxHeight: .infinity, alignment: .topLeading)
         }
-        .buttonStyle(TVPlainButtonStyle())
-        .focusEffectDisabled()
+        .buttonStyle(.card)
         .focused($focus, equals: .station(service.id))
     }
 
@@ -242,11 +235,11 @@ struct TVLiveMenuView: View {
     private func marks(_ service: Service) -> some View {
         if service.now?.recording == true {
             Text("● 録画中")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(TVTheme.record)
         } else if service.now?.reserved == true {
             Text("✓ 予約済み")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
         }
     }

@@ -19,13 +19,6 @@ enum TVLiveFocus: Hashable {
     case detailContinue
 }
 
-/// フォーカスの見た目は自前で描くので、ボタン自身には何もしない
-struct TVPlainButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-    }
-}
-
 /// 局ロゴ。`logo` が無い・取れないときは、面に局名の頭 1 字。iPhone の ServiceLogo の tvOS の大きさ版。
 struct TVServiceLogo: View {
     let service: Service
@@ -44,9 +37,10 @@ struct TVServiceLogo: View {
                     .scaledToFill()
             } else {
                 Text(String(service.name.prefix(1)))
+                    // ロゴの枠 (70×40) に合わせて決まる字なので、枠の高さから出す
                     .font(.system(size: height * 0.5, weight: .bold))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white.opacity(0.14))
+                    .background(.quaternary)
             }
         }
         .frame(width: width, height: height)
@@ -92,26 +86,26 @@ struct TVServiceHeader: View {
                     HStack(spacing: 14) {
                         if let key = service.remoteControlKey {
                             Text("\(key)")
-                                .font(.system(size: 28, weight: .medium))
-                                .foregroundStyle(TVTheme.muted)
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(.secondary)
                         }
                         Text(service.name)
-                            .font(.system(size: 28, weight: .semibold))
+                            .font(.headline)
                         if let quality {
                             Text(quality)
-                                .font(.system(size: 28))
-                                .foregroundStyle(TVTheme.muted)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     HStack(spacing: 14) {
                         Text(service.now?.title ?? "")
-                            .font(DenpaFont.font(size: 28))
+                            .font(DenpaFont.font(.body))
                             .fontWeight(.bold)
-                            .foregroundStyle(TVTheme.body)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Text(TVLiveText.remaining(service.now, now: context.date))
-                            .font(.system(size: 28))
-                            .foregroundStyle(TVTheme.muted)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -130,7 +124,7 @@ struct TVProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.22))
                 Capsule()
-                    .fill(Color.accentColor)
+                    .fill(.white)
                     .frame(width: proxy.size.width * min(max(value, 0), 1))
             }
         }

@@ -5,8 +5,12 @@ import SwiftUI
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
 /// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
+/// 字幕の持ち上げ量は操作の列の上端と映像面の実寸から決めるので、題と操作の列の字は
+/// テキストスタイルのまま拡大してよい。題だけは放送の字なので .title2 に揃える (旧 44pt)。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
+    /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
+    var onDeleted: () -> Void = {}
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var app
@@ -20,6 +24,8 @@ struct TVRecordingPlayerView: View {
     @State private var controlsVisible = false
     @State private var hideTask: Task<Void, Never>?
     @State private var focusTask: Task<Void, Never>?
+    @State private var videoFrame: CGRect?
+    @State private var controlsTop: CGFloat?
     @FocusState private var surfaceFocused: Bool
     @FocusState private var control: Control?
 
@@ -31,8 +37,8 @@ struct TVRecordingPlayerView: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.ignoresSafeArea()
-                video(height: proxy.size.height)
-                if controlsVisible, session.stop == nil, !session.finished {
+                video(safeAreaBottom: proxy.frame(in: .global).maxY)
+                if showsControls {
                     shade(height: 520, opacity: 0.78)
                     controls
                 }
@@ -52,14 +58,21 @@ struct TVRecordingPlayerView: View {
         }
         .onExitCommand {
             // 戻る: 出ているものを閉じる。何も出ていなければ再生の画面を閉じる (3.5.1)
-            if controlsVisible, session.stop == nil, !session.finished {
+            if showsControls {
                 hideControls()
             } else {
                 close()
             }
         }
         .task { await session.start() }
-        .onAppear { surfaceFocused = true }
+        // 開いた直後の焦点は映像の面に置く (純正と同じ)。開いた 1 回だけ当てる。
+        // defaultFocus は焦点が外れたとき (操作の列やメニューへ移ったとき) にも既定を当て直そうとし、
+        // 面が操作の列を出している間も focusable なままなので、札やメニューから焦点を奪う。
+        // onAppear は焦点の仕組みより先に走ることがあるので、1 度譲ってから当てる
+        .task {
+            await Task.yield()
+            surfaceFocused = true
+        }
         .onDisappear {
             hideTask?.cancel()
             focusTask?.cancel()
@@ -67,7 +80,7 @@ struct TVRecordingPlayerView: View {
         }
         // 札から映像の面へ戻ったら、再生中は操作の列を隠す (詳細の sheet を閉じたときも同じ)
         .onChange(of: surfaceFocused) { _, focused in
-            guard focused, controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
+            guard focused, showsControls, session.isPlaying else { return }
             hideControls()
         }
         // 一時停止したら操作の列を出したままにする (再生が始まったらまた隠してよい)
@@ -93,7 +106,7 @@ struct TVRecordingPlayerView: View {
                 },
                 onClose: { showDetail = false }
             )
-            .background(TVTheme.background)
+            .background(.background)
         }
         .alert(session.recording.title, isPresented: $confirmDelete) {
             Button("削除", role: .destructive) {
@@ -115,14 +128,19 @@ struct TVRecordingPlayerView: View {
 
     // MARK: - 映像とリモコン
 
-    private func video(height: CGFloat) -> some View {
+    private var showsControls: Bool {
+        controlsVisible && session.stop == nil && !session.finished
+    }
+
+    private func video(safeAreaBottom: CGFloat) -> some View {
         ZStack {
             VideoSurface(
                 layer: session.displayLayer,
                 overlay: session.finished ? nil : captionImage,
                 // 操作の列を出している間は、字幕をその上まで持ち上げる (3.5.2)
-                overlayOffset: controlsVisible ? -captionLift(height: height) : 0
+                overlayOffset: showsControls ? -captionLift(safeAreaBottom: safeAreaBottom) : 0
             )
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { videoFrame = $0 }
             // 映像の面。ここにフォーカスがある間、左右で 10 秒、決定で一時停止・長押しで詳細。
             // 止まった・最後まで観たときはボタンへフォーカスを渡す
             Color.clear
@@ -144,12 +162,17 @@ struct TVRecordingPlayerView: View {
                         break
                     }
                 }
-                // 長押しとタップは排他。長押しのあとに来る決定で再生/一時停止を動かさない (3.5.1)
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.6)
-                        .onEnded { _ in openDetail() }
-                        .exclusively(before: TapGesture().onEnded { session.togglePlayCommand() })
-                )
+                // 2 つを `exclusively(before:)` で組むと実機の決定で一時停止しなかった。
+                // 前の LongPressGesture が押下を先に取り、0.6 秒に届かない短い押下が Tap に渡らないためと見ている (推測)。
+                // ライブの映像の面と同じく、2 つを別々に受ける
+                .onTapGesture {
+                    // 長押しで詳細を開いたあとに離した決定は受け止める
+                    guard !showDetail else { return }
+                    session.togglePlayCommand()
+                }
+                .onLongPressGesture(minimumDuration: 0.6) {
+                    openDetail()
+                }
         }
         .ignoresSafeArea()
     }
@@ -167,22 +190,31 @@ struct TVRecordingPlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// 字幕を持ち上げる量。操作の列 (下から約 340pt) の上へ、字幕の面の字の下端が来るようにする
-    private func captionLift(height: CGFloat) -> CGFloat {
-        guard height > 0, let page = session.captionPage else { return 0 }
+    /// 字幕の下端を映像面の座標から求め、同じ座標系で操作の列の上端と比べる。
+    private func captionLift(safeAreaBottom: CGFloat) -> CGFloat {
+        guard let videoFrame, videoFrame.height > 0, let page = session.captionPage else { return 0 }
         let span = CaptionLayout.inkSpan(page: page)
-        let top = height - Self.controlsHeight
-        return max(0, span.bottom * height - top + 16)
+        // 355pt は列の初回計測までの暫定値 (題 1 行の見積り)。再表示時は前回の実測値を使う。
+        return CaptionLayout.liftAboveControls(
+            normalizedBottom: span.bottom,
+            videoFrame: videoFrame,
+            controlsTop: controlsTop ?? safeAreaBottom - 355
+        )
     }
-
-    /// 操作の列の高さの見積り (題・シークバー・時刻・札・下の余白)
-    private static let controlsHeight: CGFloat = 340
 
     // MARK: - 操作の層
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
+            column
+        }
+        .padding(.horizontal, 96)
+    }
+
+    /// 下に並ぶ列。字幕の持ち上げ量は、題が 1 行でも 2 行でも合うこの実寸から取る
+    private var column: some View {
+        VStack(alignment: .leading, spacing: 0) {
             titleBlock
             scrubber
                 .padding(.top, 52)
@@ -191,8 +223,8 @@ struct TVRecordingPlayerView: View {
             pillRow
                 .padding(.top, 18)
         }
-        .padding(.horizontal, 96)
         .padding(.bottom, 48)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { controlsTop = $0 }
     }
 
     private var titleBlock: some View {
@@ -204,14 +236,14 @@ struct TVRecordingPlayerView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 4)
-                        .background(.red, in: RoundedRectangle(cornerRadius: 8))
+                        .background(TVTheme.record, in: RoundedRectangle(cornerRadius: 8))
                 }
                 Text("\(session.recording.serviceName) · \(dateRange)")
                     .font(.system(size: 26))
                     .foregroundStyle(.white.opacity(0.78))
             }
             Text(session.recording.title)
-                .font(DenpaFont.font(size: 44))
+                .font(DenpaFont.font(.title2))
                 .fontWeight(.bold)
                 .lineLimit(2)
         }
@@ -251,9 +283,6 @@ struct TVRecordingPlayerView: View {
                 Circle()
                     .fill(.white)
                     .frame(width: 30, height: 30)
-                    .overlay {
-                        Circle().strokeBorder(Color.accentColor, lineWidth: 5)
-                    }
                     .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
                     .offset(x: width * fraction - 15)
             }
@@ -365,7 +394,6 @@ struct TVRecordingPlayerView: View {
                 }
             }
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
     }
@@ -459,7 +487,7 @@ struct TVRecordingPlayerView: View {
         VStack(spacing: 14) {
             ProgressView()
             Text("再接続中…")
-                .font(.system(size: 30, weight: .semibold))
+                .font(.title3.weight(.semibold))
         }
         .padding(36)
         .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 22))
@@ -468,23 +496,22 @@ struct TVRecordingPlayerView: View {
     private func errorOverlay(_ stop: RecordingSession.Stop) -> some View {
         VStack(spacing: 10) {
             Text(title(of: stop))
-                .font(.system(size: 40, weight: .bold))
+                .font(.title2.bold())
                 .multilineTextAlignment(.center)
             if !message(of: stop).isEmpty {
                 Text(message(of: stop))
-                    .font(.system(size: 28))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             HStack(spacing: 20) {
                 if stop.retry {
                     Button("再試行") { session.retry() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
                 }
                 Button("閉じる", action: close)
                     .buttonStyle(.bordered)
             }
-            .font(.system(size: 28, weight: .semibold))
             .controlSize(.large)
             .padding(.top, 26)
         }
@@ -521,18 +548,17 @@ struct TVRecordingPlayerView: View {
             shade(height: 620, opacity: 0.85)
             VStack(alignment: .leading, spacing: 8) {
                 Text("最後まで観ました")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                 Text(session.recording.title)
-                    .font(DenpaFont.font(size: 40))
+                    .font(DenpaFont.font(.title2))
                     .fontWeight(.bold)
-                    .foregroundStyle(.white.opacity(0.86))
+                    .foregroundStyle(.primary)
                 HStack(spacing: 20) {
                     Button("一覧へ戻る", action: close)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
                     Button("削除", role: .destructive) { confirmDelete = true }
                         .buttonStyle(.bordered)
                 }
-                .font(.system(size: 28, weight: .semibold))
                 .controlSize(.large)
                 .padding(.top, 20)
             }
@@ -582,6 +608,7 @@ struct TVRecordingPlayerView: View {
     private func deleteRecording() async {
         do {
             _ = try await app.delete("api/recordings/\(session.recording.id)")
+            onDeleted()
             close()
         } catch AppModel.APIError.http(_, let message) {
             alertMessage = message ?? String(localized: "しばらくしてから、もう一度お試しください。")

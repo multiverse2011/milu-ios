@@ -133,6 +133,8 @@ final class RecordingSession {
     /// (denpa の api.md「rung」: 混んでいて断られたら今のストリームをそのまま続ける)
     private var trialLoader: StreamLoader?
     private var trialFrom: Double = 0
+    /// 同じ押下が 2 つの経路 (決定・再生/一時停止ボタンと Now Playing) から届いたかの控え
+    private var press = PressGuard()
 
     init(
         baseURL: URL,
@@ -145,7 +147,8 @@ final class RecordingSession {
         defaults: UserDefaults = .standard,
         nowPlaying: NowPlayingController = .shared,
         startStream: @escaping (StreamLoader) -> Void = { $0.start() },
-        waitForChapterRetry: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        waitForChapterRetry: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        clock: @escaping () -> DispatchTime = { .now() }
     ) {
         self.baseURL = baseURL
         self.token = token
@@ -162,6 +165,7 @@ final class RecordingSession {
         self.policy = RecordingPlaybackPolicy(playable: playable)
         self.cmSkipEnabled = recording.cmReliable
         self.captionsOn = defaults.object(forKey: "captionsOn") as? Bool ?? true
+        self.press.now = clock
     }
 
     // MARK: - 開く
@@ -434,11 +438,16 @@ final class RecordingSession {
 
     @discardableResult
     func togglePlayCommand() -> Bool {
+        let shouldPause = isPlaying || (phase == .loading && !pendingPause)
+        return setPlayingFromCommand(!shouldPause)
+    }
+
+    /// 決定・再生/一時停止ボタンと Now Playing の play/pause/toggle で押下の控えを共有する。
+    private func setPlayingFromCommand(_ shouldPlay: Bool) -> Bool {
         guard !closed, stop == nil, !finished else { return false }
-        if isPlaying || (phase == .loading && !pendingPause) {
-            return pause()
-        }
-        return play()
+        // 捨てた押下も「扱った」として true を返す (Now Playing に noActionableNowPlayingItem を返さない)
+        guard press.claim() else { return true }
+        return shouldPlay ? play() : pause()
     }
 
     func togglePlay() {
@@ -666,8 +675,8 @@ final class RecordingSession {
                 position: position,
                 duration: scrubDuration
             ),
-            onPlay: { [weak self] in self?.play() ?? false },
-            onPause: { [weak self] in self?.pause() ?? false },
+            onPlay: { [weak self] in self?.setPlayingFromCommand(true) ?? false },
+            onPause: { [weak self] in self?.setPlayingFromCommand(false) ?? false },
             onToggle: { [weak self] in self?.togglePlayCommand() ?? false }
         )
     }
