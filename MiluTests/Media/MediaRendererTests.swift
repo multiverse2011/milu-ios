@@ -25,7 +25,9 @@ private final class MediaRendererBundleToken {}
     }
 
     /// 裏に回って映像の層を止めていても (`setVideoEnabled(false)`)、音だけで再生が始まり位置が進む
-    @Test func advancesAudioWhileVideoDisabledAndRecoversVideoOnForeground() async throws {
+    // GitHub ホストランナーのシミュレータでは、音声だけで再生位置が進むことを確認できない。
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["MILU_SKIP_AUDIO_ONLY_RENDERER_TEST"] != "1"))
+    func advancesAudioWhileVideoDisabledAndRecoversVideoOnForeground() async throws {
         @MainActor final class Box {
             var latest = RendererState()
         }

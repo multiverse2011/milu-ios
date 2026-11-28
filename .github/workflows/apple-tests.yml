@@ -1,0 +1,86 @@
+name: Apple プラットフォームの単体テスト
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-tests:
+    name: iOS の単体テスト
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Xcode 27.2 を選ぶ
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.2.app
+          xcodebuild -version
+      - name: Xcode プロジェクトを生成する
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          xcodegen generate
+      - name: iPhone 17 で単体テストを実行する
+        env:
+          TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
+        run: |
+          mkdir -p DerivedData/results
+          # Keychain を使うテストには entitlement が必要なので、証明書不要のアドホック署名を使う
+          xcodebuild test -project Milu.xcodeproj -scheme Milu \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath DerivedData/ios \
+            -resultBundlePath DerivedData/results/Milu-iOS.xcresult \
+            CODE_SIGN_IDENTITY=-
+      - name: 失敗・中断時のテスト結果を保存する
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: milu-ios-test-results
+          path: DerivedData/results/
+          if-no-files-found: warn
+          retention-days: 3
+
+  tvos-tests:
+    name: tvOS の単体テスト
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Xcode 27.2 を選ぶ
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_27.2.app
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Xcode プロジェクトを生成する
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          xcodegen generate
+      - name: Apple TV 4K で単体テストを実行する
+        env:
+          TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
+        run: |
+          mkdir -p DerivedData/results
+          xcodebuild test -project Milu.xcodeproj -scheme Milu \
+            -destination 'platform=tvOS Simulator,name=Apple TV 4K (4th generation)' \
+            -derivedDataPath DerivedData/tvos \
+            -resultBundlePath DerivedData/results/Milu-tvOS.xcresult \
+            CODE_SIGN_IDENTITY=-
+      - name: 失敗・中断時のテスト結果を保存する
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: milu-tvos-test-results
+          path: DerivedData/results/
+          if-no-files-found: warn
+          retention-days: 3
