@@ -71,6 +71,13 @@ private struct TVGuideBoard: View {
         case day(Date)
         case column(Int)
         case aboveGrid
+        case columnEdge(ColumnEdge)
+    }
+
+    private enum ColumnEdge: Hashable {
+        case left, right
+
+        var step: Int { self == .left ? -1 : 1 }
     }
 
     @FocusState private var focus: Focus?
@@ -150,10 +157,16 @@ private struct TVGuideBoard: View {
         .onChange(of: guide.services) { _, services in
             repairFocus(services, now: Date())
         }
-        // 焦点が列に移ったら、基準の時刻でその列の番組を選ぶ。左右の移動はこれだけで決める
+        // 列への直接移動と、格子の外にある隣の列への移動を焦点の遷移で扱う。
         .onChange(of: focus) { old, new in
             // 詳細の出入りで一時的に当たったチップや列を、カーソルの移動に使わない。
             guard opened == nil else { return }
+            if case .columnEdge(let edge) = new {
+                if case .column(let column) = old {
+                    moveAcrossColumnEdge(edge, from: column)
+                }
+                return
+            }
             guard case .column(let column) = new else {
                 if case .column(let previous) = old, case .some = new {
                     moveUp(from: previous)
@@ -310,8 +323,11 @@ private struct TVGuideBoard: View {
             (column: column, cells: cells(in: column, rows: rows))
         }
         let selected = resolvedCursor(now: now)
-        // 上の的を経由する間は強調を保つ。詳細を閉じる間は格子に焦点が戻るまで表示しない。
-        let highlightedColumn = focus == .aboveGrid ? lastColumn : focusColumn
+        // 格子の端の的を経由する間は強調を保つ。詳細を閉じる間は格子に焦点が戻るまで表示しない。
+        let highlightedColumn = switch focus {
+        case .aboveGrid, .columnEdge: lastColumn
+        default: focusColumn
+        }
         let focused = opened == nil && !isRestoringDetailFocus && selected?.column == highlightedColumn ? selected : nil
         let nowY = nowOffset(now: now)
         let ring = focusFrame(for: focused)
@@ -351,6 +367,31 @@ private struct TVGuideBoard: View {
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .contentShape(Rectangle())
         .clipped()
+        .overlay(alignment: .topLeading) {
+            // 左は時刻列の中、右は格子の外側の 40 pt の余白に置く。選択列の的とは重ねない。
+            ZStack(alignment: .topLeading) {
+                columnEdgeTarget(.left, size: size)
+                columnEdgeTarget(.right, size: size)
+            }
+        }
+    }
+
+    private func columnEdgeTarget(_ edge: ColumnEdge, size: CGSize) -> some View {
+        let width = 24.0
+        let timeWidth = GuideLayout.tvTimeWidth
+        let visibleWidth = Double(size.width) - timeWidth
+        let hiddenNeighbor = focusColumn
+            .flatMap { GuideCursorMotion.adjacentColumn(from: $0, in: guide.services, by: edge.step) }
+            .map { !GuideLayout.tvColumnIsVisible($0, scrollX: scroll.x, visibleWidth: visibleWidth) } ?? false
+        let target = Focus.columnEdge(edge)
+        return Color.clear
+            .frame(width: width, height: size.height)
+            .contentShape(Rectangle())
+            .focusable(opened == nil && visibleWidth > 0 && (hiddenNeighbor || focus == target))
+            .focusEffectDisabled()
+            .focused($focus, equals: target)
+            .accessibilityHidden(true)
+            .offset(x: edge == .left ? timeWidth - width : Double(size.width))
     }
 
     /// 列ごとのフォーカスの的 (見た目は出さない)。格子を 1 つの的にすると tvOS からは隣の列が
@@ -579,7 +620,23 @@ private struct TVGuideBoard: View {
         }
     }
 
-    /// 下だけを持つ。左右は tvOS の焦点の仕組み (列ごとの的) が動かす。
+    /// 画面外の隣の列を先に表示し、見えるようになってから焦点を渡す。
+    private func moveAcrossColumnEdge(_ edge: ColumnEdge, from column: Int) {
+        guard let base = resolvedCursor(now: Date()),
+              let current = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
+              let next = GuideCursorMotion.horizontal(current, in: guide.services, by: edge.step)
+        else {
+            focus = GuideCursorMotion.isUsable(column, in: guide.services) ? .column(column) : nil
+            return
+        }
+        lastColumn = next.column
+        animate(to: next, in: guide.services) {
+            guard focus == .columnEdge(edge), opened == nil else { return }
+            focus = resolvedCursor(now: Date()).map { .column($0.column) }
+        }
+    }
+
+    /// 下だけを持つ。左右は tvOS の焦点の仕組み (列または格子の端の的) が動かす。
     private func move(_ direction: MoveCommandDirection) {
         // 焦点が既にチップなどへ抜けていれば、見えないカーソルを動かさない
         guard direction == .down, opened == nil,
@@ -593,10 +650,13 @@ private struct TVGuideBoard: View {
 
     /// 焦点の移動に合わせて、表と青枠を滑らかに送る。連打では前の動きを打ち切って次へ向かう
     /// (アニメーションは溜まらない)。動いている間は、連鎖中に出した送り先の範囲を列・行に作る
-    private func animate(to cursor: GuideCursor, in services: [GuideService]) {
+    private func animate(to cursor: GuideCursor, in services: [GuideService], completion: (() -> Void)? = nil) {
         // 何も動かない (読み直しの後始末や、同じ所へ入り直しただけ) なら動きを始めない
         let target = followTarget(cursor, in: services)
-        guard cursor != self.cursor || (target != nil && target != scroll) else { return }
+        guard cursor != self.cursor || (target != nil && target != scroll) else {
+            completion?()
+            return
+        }
         if !isAnimating {
             scrollLow = scroll
             scrollHigh = scroll
@@ -612,6 +672,7 @@ private struct TVGuideBoard: View {
             isAnimating = false
             scrollLow = scroll
             scrollHigh = scroll
+            completion?()
         }
     }
 

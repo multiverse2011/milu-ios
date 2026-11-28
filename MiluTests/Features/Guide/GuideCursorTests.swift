@@ -163,6 +163,22 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.horizontal(GuideCursor(column: 1, programID: 4, anchor: 10 * 3_600_000), in: list, by: 0) == nil)
     }
 
+    @Test(arguments: [3, 5])
+    func horizontalReachesTheNextProgramAcrossWideEmptyColumns(lastColumn: Int) {
+        let hour: Int64 = 3_600_000
+        let anchor = 10 * hour + 30 * 60_000
+        let first = GuideCursor(column: 0, programID: 1, anchor: anchor)
+        let last = GuideCursor(column: lastColumn, programID: 2, anchor: anchor)
+        var list = [service(1, [(id: 1, start: 10 * hour, end: 11 * hour)])]
+        list += (1..<lastColumn).map { service(Int64($0 + 1), []) }
+        list.append(service(Int64(lastColumn + 1), [(id: 2, start: 10 * hour, end: 12 * hour)]))
+
+        #expect(GuideCursorMotion.horizontal(first, in: list, by: 1) == last)
+        #expect(GuideCursorMotion.horizontal(last, in: list, by: -1) == first)
+        #expect(GuideCursorMotion.horizontal(first, in: list, by: -1) == nil)
+        #expect(GuideCursorMotion.horizontal(last, in: list, by: 1) == nil)
+    }
+
     @Test func isUsableTellsColumnsThatCanTakeFocus() {
         var list = services
         list.append(service(3, []))

@@ -147,6 +147,17 @@ struct GuideLayoutTests {
         #expect(GuideLayout.menuLabel(for: days[7], today: now, calendar: calendar, locale: en) == "Sat 21")
     }
 
+    @Test func tvVisibleColumnsRequireAnIntersectionWithTheGrid() {
+        let width = 850 - GuideLayout.tvTimeWidth
+        let edge = 3 * (GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap)
+        #expect(GuideLayout.tvColumnIsVisible(0, scrollX: 0, visibleWidth: width))
+        #expect(!GuideLayout.tvColumnIsVisible(3, scrollX: 0, visibleWidth: width))
+        #expect(!GuideLayout.tvColumnIsVisible(3, scrollX: edge - width, visibleWidth: width))
+        #expect(GuideLayout.tvColumnIsVisible(3, scrollX: edge - width + 1, visibleWidth: width))
+        #expect(!GuideLayout.tvColumnIsVisible(0, scrollX: GuideLayout.tvColumnWidth, visibleWidth: width))
+        #expect(!GuideLayout.tvColumnIsVisible(0, scrollX: 0, visibleWidth: 0))
+    }
+
     @Test func tvHorizontalFollowKeepsTheSelectedColumnAcrossAGap() {
         let width = 850 - GuideLayout.tvTimeWidth
         let step = GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap
