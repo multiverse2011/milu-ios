@@ -90,6 +90,16 @@ nonisolated enum GuideLayout {
         return min(max(x, lower), upper)
     }
 
+    /// 初期カーソルの列を表示するための横送り。番組がなければ左端のままにする。
+    static func tvInitialScrollX(column: Int?, visibleWidth: Double, columnCount: Int) -> Double {
+        guard let column else { return 0 }
+        let x = tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column, previous: nil, next: nil
+        )
+        let contentWidth = Double(columnCount) * (tvColumnWidth + tvColumnGap) - tvColumnGap
+        return min(max(0, x), max(0, contentWidth - visibleWidth))
+    }
+
     static func offset(
         of time: Double,
         from rangeStart: Double,

@@ -551,7 +551,11 @@ private struct TVGuideBoard: View {
     /// 的が消えると focus が nil に落ち得るので、最後に焦点のあった列も使う。
     /// サイドバー・詳細・チップに焦点がある間は、カーソルと送りだけを直す。
     private func repairFocus(_ services: [GuideService], now: Date) {
-        guard let column = lastColumn ?? focusColumn ?? cursor?.column else { return }
+        guard let column = lastColumn ?? focusColumn ?? cursor?.column else {
+            // 番組のなかった表に番組が入ったときは、初期カーソルと表示位置をそろえる。
+            if services.contains(where: { !$0.programs.isEmpty }) { reset(now: now) }
+            return
+        }
         let anchor = cursor?.anchor ?? Int64(now.timeIntervalSince1970 * 1000)
         let target = GuideCursorMotion.repairedCursor(cursor, from: column, anchor: anchor, in: services)
         guard target != cursor || (target == nil && lastColumn != nil) else { return }
@@ -808,19 +812,24 @@ private struct TVGuideBoard: View {
     /// 開いたときと、日付・種別を替えたとき。今日ならいまの線が上から 1/4 の所へ送る (3.5)。
     /// カーソルはここで置き、操作しないうちに時刻が進んでも枠が動かないようにする。
     /// ここは動かさない (即座に置き直す)
-    private func reset() {
-        let now = Date()
+    private func reset(now: Date = Date()) {
+        let initialCursor = GuideCursorMotion.initial(in: guide.services, now: Int64(now.timeIntervalSince1970 * 1000))
+        let x = GuideLayout.tvInitialScrollX(
+            column: initialCursor?.column,
+            visibleWidth: max(Double(viewport.width) - GuideLayout.tvTimeWidth, 1),
+            columnCount: guide.services.count
+        )
         let y = nowOffset(now: now).map {
             GuideLayout.initialScrollOffset(nowOffset: $0, viewportHeight: Double(viewport.height))
         } ?? 0
-        let target = CGPoint(x: 0, y: clampY(y))
+        let target = CGPoint(x: x, y: clampY(y))
         // アニメーション中でも確実に止めて即座に置き直す
         withAnimation(nil) {
             scroll = target
             isAnimating = false
             scrollLow = target
             scrollHigh = target
-            cursor = GuideCursorMotion.initial(in: guide.services, now: Int64(now.timeIntervalSince1970 * 1000))
+            cursor = initialCursor
         }
     }
 
