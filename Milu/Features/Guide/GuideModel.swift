@@ -71,6 +71,7 @@ final class GuideModel: ProgramSheetModel {
     private var tvRequestedType: ServiceType?
     /// 現在の世代の日別取得状況。追加の再試行は同時に 1 日だけ。
     private var tvDayLoads: [Date: TVDayLoad] = [:]
+    private var lastTVRecordingOperation: Task<String?, Never>?
     private var isTVGuide = false
 
     private struct TVDayResponse {
@@ -447,6 +448,31 @@ final class GuideModel: ProgramSheetModel {
         program.reservation != nil || program.recordingId != nil
     }
 
+    /// tvOS では前の操作の応答を反映してから、次の録画操作を送る。
+    private func performRecordingOperation(_ operation: @escaping @MainActor () async -> String?) async -> String? {
+        guard isTVGuide else { return await operation() }
+        let previous = lastTVRecordingOperation
+        let task = Task {
+            _ = await previous?.value
+            return await operation()
+        }
+        lastTVRecordingOperation = task
+        let result = await task.value
+        if lastTVRecordingOperation == task { lastTVRecordingOperation = nil }
+        return result
+    }
+
+    private func tvReservationFallback(_ response: RecordResponse?, for programID: Int64) -> ReservationInfo {
+        if response?.stateRaw == nil, response?.reserved != false,
+           var existing = program(id: programID)?.reservation, let state = existing.state,
+           [.scheduled, .recording, .conflict].contains(state) {
+            existing.reason = response?.reason ?? existing.reason
+            return existing
+        }
+        let fallback: ReservationState = response?.reserved == false ? .conflict : .scheduled
+        return ReservationInfo(stateRaw: response?.stateRaw ?? fallback.rawValue, reason: response?.reason, ruleId: nil)
+    }
+
     /// 日またぎの番組を含め、取得済みの全応答に録画操作の結果を反映する。
     private func applyTVReservation(_ reservation: ReservationInfo?, to programID: Int64) {
         var didChange = false
@@ -482,40 +508,43 @@ final class GuideModel: ProgramSheetModel {
     /// 録画を予約。失敗したら alert に出す文を返す。200 だが録らない状態ならその理由を返す (3.5)
     @discardableResult
     func reserve(_ item: GuideProgramItem) async -> String? {
-        do {
-            let data = try await app.post("api/programs/\(item.id)/record")
-            let decoder = JSONDecoder()
-            let response = try? decoder.decode(RecordResponse.self, from: data)
-            if isTVGuide {
-                let fallback: ReservationState = response?.reserved == false ? .failed : .scheduled
-                let reservation = (try? decoder.decode(ReservationInfo.self, from: data))
-                    ?? ReservationInfo(stateRaw: response?.stateRaw ?? fallback.rawValue, reason: response?.reason, ruleId: nil)
-                applyTVReservation(reservation, to: item.id)
-            } else if response?.reserved != false {
-                await refresh()
+        await performRecordingOperation { [self] in
+            do {
+                let data = try await app.post("api/programs/\(item.id)/record")
+                let decoder = JSONDecoder()
+                let response = try? decoder.decode(RecordResponse.self, from: data)
+                if isTVGuide {
+                    let reservation = (try? decoder.decode(ReservationInfo.self, from: data))
+                        ?? tvReservationFallback(response, for: item.id)
+                    applyTVReservation(reservation, to: item.id)
+                } else if response?.reserved != false {
+                    await refresh()
+                }
+                if let response, !response.reserved {
+                    return response.reason ?? String(localized: "録画できません")
+                }
+                return nil
+            } catch {
+                return Self.failureMessage(error)
             }
-            if let response, !response.reserved {
-                return response.reason ?? String(localized: "録画できません")
-            }
-            return nil
-        } catch {
-            return Self.failureMessage(error)
         }
     }
 
     /// 予約を取り消す (録画中ならそこまでの録画は残る)。失敗したら alert に出す文を返す。
     @discardableResult
     func cancel(_ item: GuideProgramItem) async -> String? {
-        do {
-            _ = try await app.delete("api/programs/\(item.id)/record")
-            if isTVGuide {
-                applyTVReservation(nil, to: item.id)
-            } else {
-                await refresh()
+        await performRecordingOperation { [self] in
+            do {
+                _ = try await app.delete("api/programs/\(item.id)/record")
+                if isTVGuide {
+                    applyTVReservation(nil, to: item.id)
+                } else {
+                    await refresh()
+                }
+                return nil
+            } catch {
+                return Self.failureMessage(error)
             }
-            return nil
-        } catch {
-            return Self.failureMessage(error)
         }
     }
 

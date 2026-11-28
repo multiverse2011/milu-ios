@@ -434,6 +434,131 @@ import Testing
         #expect(programRequestDays(stub).filter { $0 == last }.count == 1)
     }
 
+    @Test(arguments: [true, false])
+    func recordingRequestsAreSerializedOnlyForTV(isTV: Bool) async throws {
+        let now = fixedNow()
+        let today = dayStart(GuideLayout.broadcastDay(for: now))
+        let postApplied = Box(false)
+        let deleteApplied = Box(false)
+        let postWaiting = Gate()
+        let releasePost = Gate()
+        let cancelCalled = Gate()
+        let deleteSent = Gate()
+        let failedRead = Gate()
+        let stub = tvTransport(
+            until: { today + 3_600_000 }, reserved: { _ in postApplied.value && !deleteApplied.value },
+            record: { request in
+                if request.httpMethod == "POST" {
+                    postApplied.value = true
+                    await postWaiting.open()
+                    try await releasePost.requireOpen()
+                    return reply(request, 200, #"{"reserved":true,"state":"scheduled"}"#)
+                }
+                #expect(request.httpMethod == "DELETE")
+                #expect(postApplied.value)
+                deleteApplied.value = true
+                await deleteSent.open()
+                return reply(request, 200, #"{"stopped":false}"#)
+            },
+            before: { _, _ in
+                if deleteApplied.value {
+                    await failedRead.open()
+                    throw URLError(.timedOut)
+                }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        if isTV { await model.tvStart(now: now) } else { await model.reload() }
+        let item = try #require(model.program(id: today))
+        let reserved = startOperation { #expect(await model.reserve(item) == nil) }
+        #expect(await postWaiting.wait())
+
+        // POST の応答が遅れても、SSE による読み直しは先に予約済みを表示できる。
+        await model.refresh(now: now)
+        #expect(model.program(id: item.id)?.reservation?.state == .scheduled)
+        let cancelled = startOperation {
+            await cancelCalled.open()
+            #expect(await model.cancel(item) == nil)
+        }
+        #expect(await cancelCalled.wait())
+        if isTV {
+            #expect(!(await deleteSent.wait(for: .milliseconds(150))))
+        } else {
+            #expect(await deleteSent.wait(for: .seconds(1)))
+            #expect(await cancelled.wait())
+        }
+        await releasePost.open()
+        #expect(await reserved.wait())
+        #expect(await cancelled.wait())
+        #expect(await failedRead.wait())
+
+        if isTV {
+            await model.refresh(now: now)
+            #expect(model.program(id: item.id) != nil)
+            #expect(model.program(id: item.id)?.reservation == nil)
+        } else {
+            #expect(model.didFail)
+            #expect(model.program(id: item.id)?.reservation?.state == .scheduled)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func tvNonRecordingReservationUsesTheReportedStateOrKeepsTheCancelAction(explicitState: Bool) async throws {
+        let now = fixedNow()
+        let tomorrow = dayStart(dayOffset(1, from: GuideLayout.broadcastDay(for: now)))
+        let hasPosted = Box(false)
+        let stub = tvTransport(
+            until: { tomorrow + 3_600_000 },
+            record: { request in
+                hasPosted.value = true
+                let state = explicitState ? #","state":"skipped""# : ""
+                return reply(request, 200, #"{"reserved":false,"reason":"録画できません"\#(state)}"#)
+            },
+            before: { _, _ in
+                if hasPosted.value { throw URLError(.timedOut) }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let item = try #require(model.program(id: tomorrow))
+        #expect(await model.reserve(item) == "録画できません")
+        let info = try #require(model.program(id: item.id)?.reservation)
+        let state = try #require(info.state)
+        #expect(state == (explicitState ? .skipped : .conflict))
+        #expect(info.reason == "録画できません")
+        let start = Date(timeIntervalSince1970: Double(item.startAt) / 1000)
+        let end = Date(timeIntervalSince1970: Double(item.endAt) / 1000)
+        let future = programActions(now: now, startAt: start, endAt: end, reservation: (state, info.reason))
+        let onAir = programActions(now: start, startAt: start, endAt: end, reservation: (state, info.reason))
+        #expect(future.buttons.contains(.cancelReservation) == !explicitState)
+        #expect(onAir.buttons.contains(.cancelReservation) == !explicitState)
+    }
+
+    @Test func tvReservationWithoutAStateRetainsTheKnownRecordingState() async throws {
+        let now = fixedNow()
+        let today = dayStart(GuideLayout.broadcastDay(for: now))
+        let hasPosted = Box(false)
+        let stub = tvTransport(
+            until: { today + 3_600_000 },
+            record: { request in
+                if hasPosted.value { return reply(request, 200, #"{"reserved":true}"#) }
+                hasPosted.value = true
+                return reply(request, 200, #"{"reserved":true,"state":"recording"}"#)
+            },
+            before: { _, _ in
+                if hasPosted.value { throw URLError(.timedOut) }
+            }
+        )
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+        let item = try #require(model.program(id: today))
+        #expect(await model.reserve(item) == nil)
+        #expect(model.program(id: item.id)?.reservation?.state == .recording)
+
+        #expect(await model.reserve(item) == nil)
+        #expect(model.program(id: item.id)?.reservation?.state == .recording)
+    }
+
     @Test(arguments: ["POST", "DELETE"], [false, true])
     func tvRecordingChangeUpdatesTheCrossingProgramBeforeRefreshReturns(method: String, readsFail: Bool) async throws {
         let now = fixedNow()
@@ -859,7 +984,7 @@ import Testing
         crossingBoundary: Int64? = nil,
         empty: @escaping @Sendable (Int64) -> Bool = { _ in false },
         reserved: @escaping @Sendable (Int64) -> Bool = { _ in false },
-        record: (@Sendable (URLRequest) -> (Data, HTTPURLResponse))? = nil,
+        record: StubTransport.Handler? = nil,
         before: @escaping @Sendable (String, Int64) async throws -> Void = { _, _ in }
     ) -> StubTransport {
         StubTransport { request in
@@ -867,7 +992,7 @@ import Testing
             if path.hasSuffix("api/services") {
                 return reply(request, 200, self.servicesJSON)
             }
-            if path.hasSuffix("/record"), let record { return record(request) }
+            if path.hasSuffix("/record"), let record { return try await record(request) }
             let query = request.url?.query ?? ""
             guard let typePart = query.split(separator: "&").first(where: { $0.hasPrefix("type=") }),
                   let fromPart = query.split(separator: "&").first(where: { $0.hasPrefix("from=") }),
