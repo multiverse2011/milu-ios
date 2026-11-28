@@ -26,8 +26,8 @@ struct GuideProgramItem: Identifiable, Equatable, Sendable {
         remoteControlKey = service.remoteControlKey
         name = program.name
         description = program.description
-        startAt = program.startAt
-        endAt = program.endAt
+        startAt = program.originalAirtime?.lowerBound ?? program.startAt
+        endAt = program.originalAirtime?.upperBound ?? program.endAt
         genre = program.genre
         reservation = program.reservation
     }
@@ -65,6 +65,8 @@ final class GuideModel: ProgramSheetModel {
     private var tvLoadTask: Task<Void, Never>?
     /// 旧世代の取消後も通信が終わるまで、再試行の枠を 1 つに保つ。
     private var tvRetryTask: Task<Void, Never>?
+    /// 枠が埋まっている間、現在の世代から受け付けた最初の再試行を 1 件だけ保持する。
+    private var tvPendingRetry: (generation: Int, day: Date)?
     /// 新しい種別は起点の日を読めるまで選択表示に反映しない。
     private var tvRequestedType: ServiceType?
     /// 現在の世代の日別取得状況。追加の再試行は同時に 1 日だけ。
@@ -139,15 +141,8 @@ final class GuideModel: ProgramSheetModel {
 
     /// いま開いている範囲の番組 (シートの中身の最新)
     func program(id: Int64) -> GuideProgramItem? {
-        if isTVGuide {
-            guard let service = tvGuide?.services.first(where: { $0.programs.contains { $0.id == id } }) else { return nil }
-            // 詳細には描画用の切り取り前の時刻と予約・録画情報を渡す。
-            let matches = tvDays.compactMap { day in
-                tvResponses[day]?.services.first { $0.id == service.id }?.programs.first { $0.id == id }
-            }
-            return (matches.last(where: Self.hasMark) ?? matches.last).map { GuideProgramItem(service: service, program: $0) }
-        }
-        return guide?.services.lazy.flatMap { service in
+        let source = isTVGuide ? tvGuide : guide
+        return source?.services.lazy.flatMap { service in
             service.programs.map { GuideProgramItem(service: service, program: $0) }
         }.first { $0.id == id }
     }
@@ -218,6 +213,7 @@ final class GuideModel: ProgramSheetModel {
         let generation = tvGeneration
         tvLoadTask?.cancel()
         tvRetryTask?.cancel()
+        tvPendingRetry = nil
         tvDayLoads = Dictionary(uniqueKeysWithValues: tvDays.map { ($0, .loading) })
         let task = Task {
             defer {
@@ -306,14 +302,21 @@ final class GuideModel: ProgramSheetModel {
 
     /// 通常取得を終えた空の日だけを、更新世代につき 1 回読み直す。
     func tvRetry(day: Date) async {
-        guard tvRequestedType == nil, tvDays.contains(day), tvResponses[day] == nil, tvDayLoads[day] == nil,
-              tvRetryTask == nil
-        else { return }
+        await startTVRetry(day: day)?.value
+    }
+
+    @discardableResult
+    private func startTVRetry(day: Date) -> Task<Void, Never>? {
+        guard tvRequestedType == nil, tvDays.contains(day), tvResponses[day] == nil, tvDayLoads[day] == nil else { return nil }
+        if tvRetryTask != nil {
+            if tvPendingRetry == nil { tvPendingRetry = (tvGeneration, day) }
+            return nil
+        }
         tvDayLoads[day] = .retrying
         let generation = tvGeneration
         let type = selectedType
         let task = Task {
-            defer { tvRetryTask = nil }
+            defer { finishTVRetry() }
             let response = await Self.readTVDay(day, type: type, app: app)
             guard generation == tvGeneration else { return }
             tvDayLoads[day] = .retried
@@ -323,7 +326,14 @@ final class GuideModel: ProgramSheetModel {
             }
         }
         tvRetryTask = task
-        await task.value
+        return task
+    }
+
+    private func finishTVRetry() {
+        tvRetryTask = nil
+        let pending = tvPendingRetry
+        tvPendingRetry = nil
+        if let pending, pending.generation == tvGeneration { startTVRetry(day: pending.day) }
     }
 
     private nonisolated static func readTVDay(_ day: Date, type: ServiceType, app: AppModel) async -> GuideResponse? {
@@ -363,7 +373,9 @@ final class GuideModel: ProgramSheetModel {
                     let start = max(program.startAt, range.lowerBound)
                     let end = min(program.endAt, range.upperBound)
                     guard start < end else { return nil }
+                    if start == program.startAt, end == program.endAt { return program }
                     var clipped = program
+                    clipped.originalAirtime = program.startAt..<program.endAt
                     clipped.startAt = start
                     clipped.endAt = end
                     return clipped

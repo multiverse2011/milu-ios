@@ -452,7 +452,7 @@ private struct TVGuideBoard: View {
                         .offset(x: Double(column) * columnStep(), y: top - scrollY)
                         // フォーカス中のマスは過ぎた所の黒より上に描く (画面案の z の順)
                         .zIndex(highlighted?.column == column && highlighted?.program.id == cell.item.id
-                            && highlighted?.program.startAt == cell.item.startAt ? 1 : 0)
+                            && highlighted?.program.startAt == cell.segmentStart ? 1 : 0)
                 }
             }
             // 起点より後の 4:00 に、時刻の列の日付見出しと同じ位置で線を引く。
@@ -637,10 +637,11 @@ private struct TVGuideBoard: View {
         }
 
         let item: GuideProgramItem
+        let segmentStart: Int64
         let title: AttributedString
         let top: Double
         let height: Double
-        var id: ID { ID(programID: item.id, startAt: item.startAt) }
+        var id: ID { ID(programID: item.id, startAt: segmentStart) }
     }
 
     private func cells(in column: Int, rows: ClosedRange<Double>) -> [Cell] {
@@ -657,7 +658,7 @@ private struct TVGuideBoard: View {
                 frame.top + frame.height >= rows.lowerBound
             else { return nil }
             let item = GuideProgramItem(service: service, program: program)
-            return Cell(item: item, title: TVGuideCell.title(for: item), top: frame.top, height: frame.height)
+            return Cell(item: item, segmentStart: program.startAt, title: TVGuideCell.title(for: item), top: frame.top, height: frame.height)
         }
     }
 
@@ -788,15 +789,14 @@ private struct TVGuideBoard: View {
 
     /// 決定。焦点の列 (タップした列) の番組を開く
     private func open(column: Int, now: Date) {
-        guard !isDetailCoverActive, let selection = selection(column: column, now: now),
-              let item = model.program(id: selection.item.id) else { return }
+        guard !isDetailCoverActive, let selection = selection(column: column, now: now) else { return }
         cursor = selection.cursor
         lastColumn = column
         liveWatchAtOpen = app.liveWatch
         isRestoringDetailFocus = false
         isDetailCoverActive = true
         detailGeneration += 1
-        opened = item
+        opened = selection.item
     }
 
     /// Menu をシステムが処理してカバーを閉じる場合も、同じ閉じ始めの処理を通す。

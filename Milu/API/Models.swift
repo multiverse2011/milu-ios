@@ -129,6 +129,13 @@ struct GuideProgram: @nonisolated Decodable, Equatable, Sendable {
     var reservation: ReservationInfo?
     /// その番組のそのまま観られる録画。無ければ `null`
     var recordingId: Int64?
+
+    /// tvOS の格子用に startAt/endAt を切り取った場合だけ、元の放送時刻を持つ。
+    var originalAirtime: Range<Int64>? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, startAt, endAt, description, genre, copyNever, reservation, recordingId
+    }
 }
 
 /// 予約の状態 (`reservation`)。`state` の生の字も持ち、知らない値が来ても読みは落ちない。

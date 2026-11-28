@@ -453,10 +453,31 @@ import Testing
         await releaseOld.open()
         #expect(await oldFinished.wait())
         #expect(oldCancelled.value)
-        #expect(model.program(id: start) == nil)
-        await model.tvRetry(day: missing)
+        #expect(await waitUntil { model.program(id: start)?.name == "新番組" })
         #expect(attempts.value == 4)
         #expect(model.program(id: start)?.name == "新番組")
+    }
+
+    @Test func tvCrossingProgramKeepsItsBroadcastTimeWhenOnlyTheSecondDayIsRead() async throws {
+        let now = fixedNow()
+        let base = GuideLayout.broadcastDay(for: now)
+        let missing = dayStart(dayOffset(1, from: base))
+        let boundary = dayStart(dayOffset(2, from: base))
+        let id = boundary - 600_000
+        let stub = tvTransport(until: { boundary + 3_600_000 }, crossingBoundary: boundary, before: { _, from in
+            if from == missing { throw URLError(.timedOut) }
+        })
+        let (model, _, _) = fixture(stub, now: now)
+        await model.tvStart(now: now)
+
+        let service = try #require(model.tvGuide?.services.first)
+        let segment = try #require(service.programs.first { $0.id == id })
+        #expect(segment.startAt == boundary)
+        #expect(segment.endAt == boundary + 1_200_000)
+        let item = GuideProgramItem(service: service, program: segment)
+        #expect(item.startAt == id)
+        #expect(item.endAt == boundary + 1_200_000)
+        #expect(model.program(id: id) == item)
     }
 
     @Test func tvCrossingProgramStopsAtTheMissingDayAndRejoinsAfterRetry() async throws {
