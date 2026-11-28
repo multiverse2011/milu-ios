@@ -261,6 +261,20 @@ import Testing
         await session.close()
     }
 
+    /// CM 飛ばしで開き直しても、同じ画面の印 (前の変換を譲らせる) と、始めてよいコマから始める求めを付ける
+    @Test func commercialSkipAsksForCleanStartAsTheSameViewer() async throws {
+        var startedURLs: [URL] = []
+        let session = try await makeCommercialSession { startedURLs.append($0.url) }
+        report(12, to: session)
+        let sent = startedURLs.map { params($0) }
+        #expect(sent.count == 2)
+        #expect(sent.allSatisfy { $0["clean"] == "1" })
+        let viewer = try #require(sent.first?["viewer"])
+        #expect(viewer.range(of: #"^[\w-]{8,64}$"#, options: .regularExpression) != nil)
+        #expect(sent.last?["viewer"] == viewer)
+        await session.close()
+    }
+
     @Test func autoSkipHandlesAdjacentCommercials() async throws {
         let session = try await makeCommercialSession()
         let generation = session.generation
