@@ -74,6 +74,8 @@ final class PlaybackSession {
     /// (denpa の api.md「rung」: 混んでいて断られたら今のストリームをそのまま続ける)
     private var trialLoader: StreamLoader?
     private let startLoader: (StreamLoader) -> Void
+    /// いまアプリが裏か。テストから差し替える (シミュレータのホストの状態で成否が変わらないように)
+    private let appIsBackground: @MainActor () -> Bool
     private var captionQueue: [(page: CaptionPage, time: Double)] = []
     private var shownCaptionTime: Double?
     private var connectionTask: Task<Void, Never>?
@@ -100,12 +102,14 @@ final class PlaybackSession {
         onNeedsPairing: @escaping @MainActor (URL) -> Void,
         playable: [OfferCodec] = Playable.formats,
         clock: @escaping () -> DispatchTime = { .now() },
-        startLoader: @escaping (StreamLoader) -> Void = { $0.start() }
+        startLoader: @escaping (StreamLoader) -> Void = { $0.start() },
+        appIsBackground: @escaping @MainActor () -> Bool = { UIApplication.shared.applicationState == .background }
     ) {
         self.devicePlayable = playable
         self.playable = playable
         self.policy = LivePlaybackPolicy(playable: playable)
         self.startLoader = startLoader
+        self.appIsBackground = appIsBackground
         self.baseURL = baseURL
         self.token = token
         self.defaults = defaults
@@ -664,7 +668,7 @@ final class PlaybackSession {
         if state.videoFailed,
            !inBackground,
            state.videoEpoch == videoEpoch,
-           UIApplication.shared.applicationState != .background,
+           !appIsBackground(),
            !handledDecodeFailure {
             handledDecodeFailure = true
             if let codec = currentCodec {
