@@ -20,28 +20,25 @@ struct TVRecordingDetailView: View {
     @State private var confirmDelete = false
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            background
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    title
-                    if let resumeText {
-                        progress(resumeText)
-                    }
-                    facts
-                    buttons
-                    bodyText
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                title
+                if let resumeText {
+                    progress(resumeText)
                 }
-                .frame(width: 1300, alignment: .leading)
-                .padding(.leading, 140)
-                .padding(.top, 110)
-                .padding(.bottom, Self.bottomPadding)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                facts
+                buttons
+                bodyText
             }
-            .scrollIndicators(.hidden)
-            .tvContinueHint(bottomPadding: Self.bottomPadding)
+            .frame(width: 1300, alignment: .leading)
+            .padding(.top, 110)
+            .padding(.bottom, Self.bottomPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollIndicators(.hidden)
+        .tvContinueHint(bottomPadding: Self.bottomPadding)
+        .background(.background)
         .onExitCommand(perform: onClose)
         .task { await load() }
         .alert(recording.title, isPresented: $confirmDelete) {
@@ -52,36 +49,18 @@ struct TVRecordingDetailView: View {
         }
     }
 
-    /// 画面案の `linear-gradient(180deg, #9cc8ec, #2e4a5e)` を全画面に薄くかけた地
-    private var background: some View {
-        ZStack {
-            TVTheme.background
-            LinearGradient(
-                colors: [
-                    Color(red: 0.61, green: 0.78, blue: 0.93),
-                    Color(red: 0.18, green: 0.29, blue: 0.37),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .opacity(0.22)
-            .blur(radius: 40)
-        }
-        .ignoresSafeArea()
-    }
-
     private var header: some View {
         HStack(spacing: 16) {
             TVChannelLogo(name: recording.serviceName)
             Text("\(recording.serviceName) · \(dateRange) · \(length)")
-                .font(.system(size: 28))
-                .foregroundStyle(TVTheme.body)
+                .font(.body)
+                .foregroundStyle(.primary)
         }
     }
 
     private var title: some View {
         Text(recording.title)
-            .font(DenpaFont.font(size: 60))
+            .font(DenpaFont.font(.title))
             .fontWeight(.bold)
             .lineLimit(3)
             .padding(.top, 16)
@@ -91,16 +70,16 @@ struct TVRecordingDetailView: View {
         HStack(spacing: 20) {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.22))
+                    Capsule().fill(.quaternary)
                     Capsule()
-                        .fill(Color.accentColor)
+                        .fill(.primary)
                         .frame(width: proxy.size.width * watchedFraction)
                 }
             }
             .frame(width: 520, height: 8)
             Text(text)
-                .font(.system(size: 26))
-                .foregroundStyle(TVTheme.muted)
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
         .padding(.top, 22)
     }
@@ -117,36 +96,35 @@ struct TVRecordingDetailView: View {
 
     private func chip(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 24))
+            .font(.callout)
             .padding(.horizontal, 14)
             .padding(.vertical, 4)
-            .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 優先度は 主要 = prominent、破壊的 = role、ほか = bordered で表す
+    /// 押せる物は bordered に揃えて tint で塗らず、破壊的 (削除) だけ role で表す
     private var buttons: some View {
         HStack(spacing: 20) {
             if recording.recording {
                 Button("再生") { onPlay(nil) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
             } else if let startResumeMs {
                 Button("続きから再生 (\(Wording.position(startResumeMs)))") {
                     onPlay(Double(startResumeMs) / 1000)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 Button("最初から") { onPlay(0) }
                     .buttonStyle(.bordered)
                 deleteButton
             } else {
                 Button("再生") { onPlay(nil) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                 deleteButton
             }
             Button("閉じる", action: onClose)
                 .buttonStyle(.bordered)
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
         .padding(.top, 36)
@@ -162,22 +140,22 @@ struct TVRecordingDetailView: View {
         if let detail {
             if !detail.description.isEmpty {
                 TVReadingText(
-                    text: detail.description, font: DenpaFont.font(size: 30),
+                    text: detail.description, font: DenpaFont.font(.body),
                     lineSpacing: 10, scalesWithTextSize: true
                 )
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .padding(.top, 44)
             }
             ForEach(GuideText.extendedItems(detail.extended), id: \.heading) { item in
                 Text(GuideText.extendedHeading(item.heading))
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(TVTheme.body)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
                     .padding(.top, 28)
                 TVReadingText(
-                    text: item.body, font: DenpaFont.font(size: 30),
+                    text: item.body, font: DenpaFont.font(.body),
                     lineSpacing: 10, scalesWithTextSize: true
                 )
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .padding(.top, 6)
             }
         }

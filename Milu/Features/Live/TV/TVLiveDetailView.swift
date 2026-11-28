@@ -19,6 +19,7 @@ struct TVLiveDetailView: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 ScrollView(.vertical) {
                     content(now: context.date)
+                        // 映像の上に重ねていて安全域が効かないので、端の余白は残す
                         .padding(.horizontal, 140)
                         .padding(.top, 110)
                         .padding(.bottom, 120)
@@ -33,8 +34,8 @@ struct TVLiveDetailView: View {
             }
             // 画面案の下端の案内
             Text("▼ 下キーで続き")
-                .font(.system(size: 24))
-                .foregroundStyle(TVTheme.muted)
+                .font(.callout)
+                .foregroundStyle(.secondary)
                 .padding(.bottom, 50)
         }
         .defaultFocus($focus, .detailRecord, priority: .userInitiated)
@@ -45,11 +46,11 @@ struct TVLiveDetailView: View {
             HStack(spacing: 16) {
                 TVServiceLogo(service: service, baseURL: baseURL, token: token)
                 Text(headerText)
-                    .font(.system(size: 28))
-                    .foregroundStyle(TVTheme.body)
+                    .font(.body)
+                    .foregroundStyle(.primary)
             }
             Text(service.now?.title ?? "")
-                .font(DenpaFont.font(size: 60))
+                .font(DenpaFont.font(.title))
                 .fontWeight(.bold)
                 .lineSpacing(6)
                 .padding(.top, 16)
@@ -57,29 +58,29 @@ struct TVLiveDetailView: View {
                 TVProgressBar(value: TVLiveText.progress(service.now, now: now), height: 8)
                     .frame(width: 520)
                 Text(TVLiveText.remaining(service.now, now: now))
-                    .font(.system(size: 26))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             .padding(.top, 22)
             chips.padding(.top, 20)
             buttons.padding(.top, 36)
             if let description = detail?.description, !description.isEmpty {
                 Text(description)
-                    .font(DenpaFont.font(size: 30))
+                    .font(DenpaFont.font(.body))
                     .lineSpacing(12)
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: 1340, alignment: .leading)
                     .padding(.top, 44)
             }
             ForEach(Array(extendedItems.enumerated()), id: \.offset) { _, item in
                 Text(GuideText.extendedHeading(item.heading))
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(TVTheme.body)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
                     .padding(.top, 28)
                 Text(item.body)
-                    .font(DenpaFont.font(size: 30))
+                    .font(DenpaFont.font(.body))
                     .lineSpacing(12)
-                    .foregroundStyle(TVTheme.body)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: 1340, alignment: .leading)
                     .padding(.top, 6)
             }
@@ -99,10 +100,10 @@ struct TVLiveDetailView: View {
         HStack(spacing: 12) {
             ForEach(chipTitles, id: \.self) { title in
                 Text(title)
-                    .font(.system(size: 24))
+                    .font(.callout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -123,7 +124,7 @@ struct TVLiveDetailView: View {
     }
 
     /// 外観・拡大・フォーカス時の字の色は tvOS の標準の ButtonStyle に任せる (#75)。
-    /// 録画中は字と録画の赤で示す。状態でスタイルを切り替えると押した直後に
+    /// 録画中は字 (● 録画中) で示す。状態でスタイルを切り替えると押した直後に
     /// フォーカスが外れるため、bordered の 1 つに固定する
     private var buttons: some View {
         HStack(spacing: 20) {
@@ -131,13 +132,11 @@ struct TVLiveDetailView: View {
                 onToggleRecord()
             }
                 .buttonStyle(.bordered)
-                .tint(recording ? TVTheme.record : Color.accentColor)
                 .focused($focus, equals: .detailRecord)
             Button("閉じる") { onClose() }
                 .buttonStyle(.bordered)
                 .focused($focus, equals: .detailClose)
         }
-        .font(.system(size: 28, weight: .semibold))
         .controlSize(.large)
         .focusSection()
     }

@@ -8,64 +8,41 @@ struct TVServerView: View {
     @State private var error: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("接続先")
-                    .font(.system(size: 56, weight: .bold))
-
+        List {
+            Section {
+                TextField("denpa.lan:3000", text: $address)
+                    .onSubmit { reconnect() }
+            } header: {
                 Text("denpa のアドレス")
-                    .font(.system(size: 26))
-                    .foregroundStyle(TVTheme.muted)
-                    .padding(.top, 36)
-
-                HStack(spacing: 24) {
-                    Text("アドレス")
-                        .foregroundStyle(.white.opacity(0.7))
-                    TextField("denpa.lan:3000", text: $address)
-                        .textFieldStyle(.plain)
-                        .onSubmit { reconnect() }
-                }
-                .font(.system(size: 30))
-                .padding(.horizontal, 30)
-                .frame(height: 86)
-                .background(TVTheme.light, in: RoundedRectangle(cornerRadius: 18))
-                .foregroundStyle(TVTheme.ink)
-
+            } footer: {
                 Text("アドレスを変更して「再接続」を押すと、接続先を切り替えられます。")
-                    .font(.system(size: 24))
-                    .foregroundStyle(TVTheme.muted)
-                Text("状態: \(statusText)")
-                    .font(.system(size: 24))
+            }
+
+            Section {
+                LabeledContent(String(localized: "状態"), value: statusText)
                 if let error {
                     Text(error)
-                        .font(.system(size: 24, weight: .semibold))
                         .foregroundStyle(.orange)
                 }
+            }
 
-                HStack(spacing: 24) {
-                    Button("再接続") {
-                        reconnect()
+            Section {
+                Button("再接続") {
+                    reconnect()
+                }
+                .disabled(busy)
+                if model.isDemo {
+                    Button("デモを終了", role: .destructive) {
+                        Task { await model.signOut() }
                     }
-                    .disabled(busy)
-                    if model.isDemo {
-                        Button("デモを終了", role: .destructive) {
-                            Task { await model.signOut() }
-                        }
-                    } else if model.hasToken {
-                        Button("接続を解除", role: .destructive) {
-                            Task { await model.signOut() }
-                        }
+                } else if model.hasToken {
+                    Button("接続を解除", role: .destructive) {
+                        Task { await model.signOut() }
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .padding(.top, 18)
             }
-            .frame(width: 1100, alignment: .leading)
-            .padding(.leading, 430)
-            .padding(.top, 70)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .navigationTitle("接続先")
         .onAppear {
             address = model.isDemo ? "" : (model.server?.displayName ?? model.address)
         }

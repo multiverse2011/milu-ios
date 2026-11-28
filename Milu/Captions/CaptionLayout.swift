@@ -95,6 +95,14 @@ nonisolated enum CaptionLayout {
         return (max(0, top / height), min(1, bottom / height))
     }
 
+    /// 共通の座標系で、字幕の下端と操作の列の上端の間を 16pt 空ける。
+    nonisolated static func liftAboveControls(
+        normalizedBottom: CGFloat, videoFrame: CGRect, controlsTop: CGFloat
+    ) -> CGFloat {
+        let captionBottom = videoFrame.minY + normalizedBottom * videoFrame.height
+        return max(0, captionBottom - controlsTop + 16)
+    }
+
     /// `#rrggbbaa` を読む。字の色・背景の色に使う
     nonisolated static func rgba(_ hex: String) -> (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? {
         guard hex.hasPrefix("#"), hex.count == 9, let value = UInt32(hex.dropFirst(), radix: 16) else { return nil }

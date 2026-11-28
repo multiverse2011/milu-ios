@@ -11,6 +11,7 @@ nonisolated enum GuideLayout {
     static let tvPointsPerMinute = 4.6
     static let tvColumnWidth = 262.0
     static let tvColumnGap = 4.0
+    /// 時刻の列の幅 (字の大きさが既定のとき)。画面は字の大きさに合わせて広げる
     static let tvTimeWidth = 70.0
 
     /// 放送日の始まりの時刻 (時)。4:00 から翌 4:00 (日本のテレビの日付の決まり)

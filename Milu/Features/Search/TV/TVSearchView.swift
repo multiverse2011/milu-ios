@@ -23,12 +23,8 @@ struct TVSearchView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .topLeading) {
-                TVTheme.background
-                    .ignoresSafeArea()
-                content
-            }
-            .searchable(text: query, prompt: Text("番組・録画を検索"))
+            content
+                .searchable(text: query, prompt: Text("番組・録画を検索"))
         }
         .task { await model.start(app) }
         .onDisappear { model.stop() }
@@ -50,7 +46,7 @@ struct TVSearchView: View {
                 }
             case .program(let item):
                 TVProgramView(item: item, model: model, onClose: { program = nil })
-                    .background(TVTheme.background)
+                    .background(.background)
             }
         }
     }
@@ -83,7 +79,9 @@ struct TVSearchView: View {
     @ViewBuilder
     private var content: some View {
         if model.trimmedQuery.isEmpty {
-            EmptyView()
+            // 検索語が空でも、標準の検索欄を載せる画面の領域を確保する。
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if model.load == .offline {
             TVOfflineView {
                 model.retry()
@@ -95,7 +93,6 @@ struct TVSearchView: View {
         } else {
             ProgressView()
                 .controlSize(.large)
-                .tint(.white)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -149,24 +146,27 @@ struct TVSearchView: View {
             .padding(.trailing, 40)
             // 上の余白は小さくする。結果の先頭へフォーカスが移ると tvOS が結果を上へ送り、
             // 検索欄が左上の「検索」の札に潜り込む (カードの題名を絵の下へ移して縦に伸びたため)
-            // shortcut: 余白はカードの高さで測った値、カードの高さか上の構成を変えたら測り直す
-            .padding(.top, 8)
+            // 余白はカードが伸びた分を詰める (旧 56 → 8 も、題を絵の下へ移したぶんを引いた値)。
+            // 今のカードは題 .title3 (行 53.9)・メタ .callout (行 37.0) で、旧 (題 34pt = 38.2・
+            // メタ 26pt = 31.0) より題 2 行で 37.4 伸びる。8 から引くと負なので 0 にする
+            // shortcut: 画面での測り直しは別途 (0 でも残る 29.4 は余白では詰められない)
+            .padding(.top, 0)
             .padding(.bottom, 60)
         }
     }
 
     private func heading(_ title: LocalizedStringKey) -> some View {
         Text(title)
-            .font(.system(size: 28))
-            .foregroundStyle(Color(white: 0.92).opacity(0.86))
+            .font(.body)
+            .foregroundStyle(.secondary)
     }
 
     private func moreNote(_ more: Bool) -> some View {
         Group {
             if more {
                 Text("ほかにもあります。言葉を足すと絞り込めます。")
-                    .font(.system(size: 24))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -198,16 +198,16 @@ struct TVSearchView: View {
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(text.day) \(text.time) · \(program.serviceName)")
-                    .font(.system(size: 24))
-                    .foregroundStyle(TVTheme.muted)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Text(program.name)
-                    .font(DenpaFont.font(size: 30))
+                    .font(DenpaFont.font(.body))
                     .fontWeight(.bold)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 if let state = text.state {
                     Text(state.text())
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.callout.bold())
                         .foregroundStyle(state == .onAir ? TVTheme.record : Color.accentColor)
                 }
             }

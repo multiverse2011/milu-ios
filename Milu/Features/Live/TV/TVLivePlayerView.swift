@@ -212,7 +212,7 @@ struct TVLivePlayerView: View {
                     .controlSize(.large)
                     .tint(.white)
                 Text("選局しています")
-                    .font(.system(size: 34, weight: .semibold))
+                    .font(.title2.weight(.semibold))
             }
         }
         .allowsHitTesting(false)
