@@ -99,13 +99,16 @@ nonisolated enum GuideText {
         }
     }
 
+    static let tvCellVerticalPadding = 10.0
+    private static let tvTitleLineHeight = 34.0
+
     /// tvOS のマスに入る行の数 (TV-Guide)。題は 25pt・行 34pt、説明は 21pt・行 30pt、上下の余白 20pt、行の間 4pt。
     /// iPhone/iPad と違い、予約の印は題の行に並べるので、印のぶんの行は取らない。
-    static func tvCellLines(height: Double) -> (title: Int, description: Int) {
-        let titleLine = 34.0
-        let detailLine = 30.0
+    static func tvCellLines(height: Double, textScale: Double = 1) -> (title: Int, description: Int) {
+        let titleLine = tvTitleLineHeight * textScale
+        let detailLine = 30 * textScale
         let spacing = 4.0
-        let available = height - 20
+        let available = height - 2 * tvCellVerticalPadding
         guard available >= titleLine else { return (0, 0) }
         let titleLines = available >= 2 * titleLine + spacing + detailLine ? 2 : 1
         let remaining = available - Double(titleLines) * titleLine
@@ -113,6 +116,11 @@ nonisolated enum GuideText {
             ? Int((remaining - spacing) / detailLine)
             : 0
         return (titleLines, description)
+    }
+
+    static func tvCellHeadingHeight(titleLines: Int, textScale: Double) -> Double {
+        guard titleLines > 0 else { return 0 }
+        return 2 * tvCellVerticalPadding + Double(titleLines) * tvTitleLineHeight * textScale
     }
 }
 
