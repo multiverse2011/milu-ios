@@ -73,6 +73,8 @@ final class RecordingSession {
     private let defaults: UserDefaults
     private let nowPlaying: NowPlayingController
     private let nowPlayingID = UUID()
+    /// `/stream` の `?viewer=`。CM 飛ばしやシークで開き直したとき、サーバがこの画面の前の変換を止めて枠を譲らせる
+    private let viewer = UUID().uuidString
     private weak var app: AppModel?
     /// 「最初から」で開くときの位置 (秒)。`nil` なら `resumeMs` から
     private let startFrom: Double?
@@ -718,6 +720,9 @@ final class RecordingSession {
         var items = [
             URLQueryItem(name: "codec", value: offer.codec.rawValue),
             URLQueryItem(name: "from", value: String(format: "%.3f", max(0, from))),
+            URLQueryItem(name: "viewer", value: viewer),
+            // Apple のデコーダは印の付いた P のコマ (intra-refresh の回復点) から始めると崩れる。denpa の WebKit と同じく求める
+            URLQueryItem(name: "clean", value: "1"),
         ]
         if let selectedAudio { items.append(URLQueryItem(name: "audio", value: selectedAudio.id)) }
         items += PlaybackRules.rungQueryItems(rung)

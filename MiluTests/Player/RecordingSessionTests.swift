@@ -202,6 +202,12 @@ import Testing
      "offers":[{"codec":"h264","way":"stream"}]}
     """
 
+    private nonisolated static let twoAudioPlaybackJSON = """
+    {"duration":60,"axis":"encoded",
+     "audios":[{"id":"0","label":"主音声"},{"id":"1","label":"副音声"}],
+     "offers":[{"codec":"h264","way":"stream"}]}
+    """
+
     private func report(
         _ position: Double, to session: RecordingSession, isPlaying: Bool = true, buffered: Double = 5,
         recordingEndDrained: Bool = false
@@ -258,6 +264,17 @@ import Testing
                 .queryItems?.first(where: { $0.name == "from" })?.value
         }
         #expect(fromValues == ["0.000", "20.000"])
+        await session.close()
+    }
+
+    /// CM 飛ばしで開き直しても、同じ画面の印 (前の変換を譲らせる) と、始めてよいコマから始める求めを付ける
+    @Test func commercialSkipAsksForCleanStartAsTheSameViewer() async throws {
+        var startedURLs: [URL] = []
+        let session = try await makeCommercialSession { startedURLs.append($0.url) }
+        report(12, to: session)
+        try #require(startedURLs.count == 2)
+        let viewer = try cleanStartViewer(startedURLs.first)
+        #expect(try cleanStartViewer(startedURLs.last) == viewer)
         await session.close()
     }
 
@@ -676,6 +693,7 @@ import Testing
         )
 
         await session.start()
+        let viewer = try cleanStartViewer(session.currentStreamURL)
         let initialGeneration = session.generation
         session.receive(RendererState(
             isPlaying: true,
@@ -715,6 +733,8 @@ import Testing
         let streamURL = try #require(session.currentStreamURL)
         let queryItems = URLComponents(url: streamURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
         #expect(queryItems.first(where: { $0.name == "from" })?.value == "18.000")
+        // 映像の穴の開き直しも、同じ画面の viewer で clean=1 を求める
+        #expect(try cleanStartViewer(streamURL) == viewer)
 
         // 同じ gap 状態をもう一度受け取っても開き直しが増えない
         session.receive(gapState)
@@ -814,6 +834,21 @@ import Testing
         return Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
     }
 
+    /// `/stream` の clean 始まりの求め (サーバの検証を通る `viewer` と `clean=1`) を確かめ、`viewer` を返す
+    private func cleanStartViewer(
+        _ url: URL?, sourceLocation: SourceLocation = #_sourceLocation
+    ) throws -> String {
+        let query = params(url)
+        #expect(query["clean"] == "1", "clean=1 が無い", sourceLocation: sourceLocation)
+        let viewer = try #require(query["viewer"], "viewer が無い", sourceLocation: sourceLocation)
+        #expect(
+            viewer.range(of: #"^[\w-]{8,64}$"#, options: .regularExpression) != nil,
+            "viewer がサーバの検証を通らない",
+            sourceLocation: sourceLocation
+        )
+        return viewer
+    }
+
     /// 今の接続が渡した標本の数を数える (数えたあとは今までどおりレンダラへ渡す)
     private func countSamples(of loader: StreamLoader) -> Box<Int> {
         let count = Box(0)
@@ -829,11 +864,12 @@ import Testing
 
     private func makeRungSession(
         kind: RecordingSession.Kind,
-        defaults: UserDefaults? = nil
+        defaults: UserDefaults? = nil,
+        playback: String = Self.playbackJSON
     ) throws -> (RecordingSession, Loaders, AppModel, UserDefaults) {
         let transport = StubTransport { request in
             request.url?.lastPathComponent == "playback"
-                ? reply(request, 200, Self.playbackJSON)
+                ? reply(request, 200, playback)
                 : reply(request, 200)
         }
         let (app, madeDefaults) = makeApp(transport)
@@ -1148,13 +1184,8 @@ import Testing
 
     /// 音声を替えたら名前を覚え、今の位置から開き直す。同じ音声を選んでも開き直さない
     @Test func selectAudioRemembersNameAndReopens() async throws {
-        let json = """
-        {"duration":60,"axis":"encoded",
-         "audios":[{"id":"0","label":"主音声"},{"id":"1","label":"副音声"}],
-         "offers":[{"codec":"h264","way":"stream"}]}
-        """
         let transport = StubTransport { request in
-            request.url?.lastPathComponent == "playback" ? reply(request, 200, json) : reply(request, 200)
+            request.url?.lastPathComponent == "playback" ? reply(request, 200, Self.twoAudioPlaybackJSON) : reply(request, 200)
         }
         let loaders = Loaders()
         let (app, defaults) = makeApp(transport)
@@ -1188,6 +1219,148 @@ import Testing
         #expect(session.speed == 2)
         // 速度は開き直さずに替える
         #expect(loaders.all.count == opened)
+        await session.close()
+    }
+
+    // MARK: - 開き直しの印 (viewer) と clean=1
+
+    /// `/stream` を開き直すどの道でも、同じ画面の viewer と clean=1 を付ける
+    @Test func everyStreamReopenAsksForCleanStartAsTheSameViewer() async throws {
+        let (session, loaders, app, _) = try makeRungSession(
+            kind: .recording, playback: Self.twoAudioPlaybackJSON
+        )
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        let viewer = try cleanStartViewer(loaders.last.url)
+
+        // ユーザーのシーク
+        var opened = loaders.all.count
+        session.seek(to: 30)
+        #expect(loaders.all.count == opened + 1)
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 音声の選び直し
+        opened = loaders.all.count
+        session.selectAudio(session.audioTracks[1])
+        #expect(loaders.all.count == opened + 1)
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 画質の選び直し
+        opened = loaders.all.count
+        session.selectQuality(.h264)
+        #expect(loaders.all.count == opened + 1)
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 失敗からの開き直し (トークンを捨てて開き直す)
+        opened = loaders.all.count
+        session.handleFailure(StreamFailure(status: 401, message: nil, errorCode: "invalid_token"))
+        #expect(loaders.all.count == opened + 1)
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 裏から戻ったとき (直前の report が pendingPause により一時停止のまま)
+        report(30, to: session)
+        opened = loaders.all.count
+        session.enterBackground()
+        session.enterForeground()
+        #expect(loaders.all.count == opened + 1)
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 一時停止の間にサーバが閉じ、再生で開き直したとき (直前の report で一時停止のまま)
+        report(30, to: session)
+        session.handleFinish(empty: true)
+        opened = loaders.all.count
+        session.play()
+        #expect(loaders.all.count == opened + 1)
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 途切れて、待ってから同じ位置で開き直したとき
+        opened = loaders.all.count
+        session.handleFailure(StreamFailure(status: 500, message: nil, errorCode: nil))
+        await waitUntil { loaders.all.count == opened + 1 }
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+
+        // 最初の 1 本と、7 回の開き直しのすべて
+        #expect(loaders.all.count == 8)
+        #expect(loaders.all.allSatisfy { params($0.url)["clean"] == "1" && params($0.url)["viewer"] == viewer })
+        await session.close()
+    }
+
+    /// 止まったあとの「やり直す」も、同じ画面の viewer で clean=1 を求める
+    @Test func retryAfterStopAsksForCleanStartAsTheSameViewer() async throws {
+        let (session, loaders, app, _) = try makeRungSession(kind: .recording)
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        let viewer = try cleanStartViewer(loaders.last.url)
+        report(12, to: session)
+        // 200 のまま中身が空で閉じるのが 4 回続くと止まる
+        for _ in 0..<4 { session.handleFinish(empty: true) }
+        try #require(session.stop?.retry == true)
+
+        session.retry()
+        #expect(params(loaders.last.url)["from"] == "12.000")
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+        await session.close()
+    }
+
+    /// 画質の段を試すときの `/stream` にも、同じ画面の viewer と clean=1 を付ける
+    @Test func rungTrialAsksForCleanStartAsTheSameViewer() async throws {
+        let (session, loaders, app, _) = try makeRungSession(kind: .recording)
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        let viewer = try cleanStartViewer(loaders.last.url)
+        report(12, to: session)
+
+        session.selectRung(1)
+        let trial = loaders.last
+        #expect(params(trial.url)["rung"] == "1")
+        #expect(try cleanStartViewer(trial.url) == viewer)
+        await session.close()
+    }
+
+    /// 開き直しを待っている間 (映しているストリームが無い) に段を選ぶと、その場で開き直す。
+    /// そこにも同じ画面の viewer と clean=1 を付ける
+    @Test func rungChosenWhileReconnectingAsksForCleanStartAsTheSameViewer() async throws {
+        let (session, loaders, app, _) = try makeRungSession(kind: .recording)
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        let viewer = try cleanStartViewer(loaders.last.url)
+        report(12, to: session)
+        session.handleFailure(StreamFailure(status: 500, message: nil, errorCode: nil))
+        #expect(session.phase == .reconnecting)
+
+        let opened = loaders.all.count
+        session.selectRung(2)
+        #expect(loaders.all.count == opened + 1)
+        #expect(params(loaders.last.url)["rung"] == "2")
+        #expect(params(loaders.last.url)["from"] == "12.000")
+        #expect(try cleanStartViewer(loaders.last.url) == viewer)
+        await session.close()
+    }
+
+    /// viewer は画面ごと。同じ端末の設定 (UserDefaults) でも、別の RecordingSession なら別の値になる
+    @Test func eachSessionAsksWithItsOwnViewer() async throws {
+        let (_, defaults) = makeApp(StubTransport { request in reply(request, 200) })
+        var viewers: [String] = []
+        var apps: [AppModel] = []
+        for _ in 0..<2 {
+            let (session, loaders, app, _) = try makeRungSession(kind: .recording, defaults: defaults)
+            await session.start()
+            viewers.append(try cleanStartViewer(loaders.last.url))
+            await session.close()
+            apps.append(app)
+        }
+        #expect(viewers[0] != viewers[1])
+        withExtendedLifetime(apps) {}
+    }
+
+    /// 追っかけ (`/chase`) はサーバが viewer も clean も読まないので付けない
+    @Test func chaseDoesNotAskForCleanStart() async throws {
+        let (session, loaders, app, _) = try makeRungSession(kind: .chase)
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        #expect(loaders.last.url.path == "/api/recordings/1/chase")
+        #expect(params(loaders.last.url)["viewer"] == nil)
+        #expect(params(loaders.last.url)["clean"] == nil)
         await session.close()
     }
 }
