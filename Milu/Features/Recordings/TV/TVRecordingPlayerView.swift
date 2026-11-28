@@ -7,6 +7,8 @@ import SwiftUI
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
+    /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
+    var onDeleted: () -> Void = {}
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var app
@@ -59,7 +61,14 @@ struct TVRecordingPlayerView: View {
             }
         }
         .task { await session.start() }
-        .onAppear { surfaceFocused = true }
+        // 開いた直後の焦点は映像の面に置く (純正と同じ)。開いた 1 回だけ当てる。
+        // defaultFocus は焦点が外れたとき (操作の列やメニューへ移ったとき) にも既定を当て直そうとし、
+        // 面が操作の列を出している間も focusable なままなので、札やメニューから焦点を奪う。
+        // onAppear は焦点の仕組みより先に走ることがあるので、1 度譲ってから当てる
+        .task {
+            await Task.yield()
+            surfaceFocused = true
+        }
         .onDisappear {
             hideTask?.cancel()
             focusTask?.cancel()
@@ -144,12 +153,17 @@ struct TVRecordingPlayerView: View {
                         break
                     }
                 }
-                // 長押しとタップは排他。長押しのあとに来る決定で再生/一時停止を動かさない (3.5.1)
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.6)
-                        .onEnded { _ in openDetail() }
-                        .exclusively(before: TapGesture().onEnded { session.togglePlayCommand() })
-                )
+                // 2 つを `exclusively(before:)` で組むと実機の決定で一時停止しなかった。
+                // 前の LongPressGesture が押下を先に取り、0.6 秒に届かない短い押下が Tap に渡らないためと見ている (推測)。
+                // ライブの映像の面と同じく、2 つを別々に受ける
+                .onTapGesture {
+                    // 長押しで詳細を開いたあとに離した決定は受け止める
+                    guard !showDetail else { return }
+                    session.togglePlayCommand()
+                }
+                .onLongPressGesture(minimumDuration: 0.6) {
+                    openDetail()
+                }
         }
         .ignoresSafeArea()
     }
@@ -582,6 +596,7 @@ struct TVRecordingPlayerView: View {
     private func deleteRecording() async {
         do {
             _ = try await app.delete("api/recordings/\(session.recording.id)")
+            onDeleted()
             close()
         } catch AppModel.APIError.http(_, let message) {
             alertMessage = message ?? String(localized: "しばらくしてから、もう一度お試しください。")
