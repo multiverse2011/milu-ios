@@ -11,6 +11,7 @@ nonisolated enum GuideLayout {
     static let tvPointsPerMinute = 4.6
     static let tvColumnWidth = 262.0
     static let tvColumnGap = 4.0
+    /// 時刻の列の幅 (字の大きさが既定のとき)。画面は字の大きさに合わせて広げる
     static let tvTimeWidth = 70.0
 
     /// 放送日の始まりの時刻 (時)。4:00 から翌 4:00 (日本のテレビの日付の決まり)
@@ -48,6 +49,56 @@ nonisolated enum GuideLayout {
         let first = min(max(0, Int(((scrollX - margin) / step).rounded(.down))), count - 1)
         let last = min(count - 1, Int(((scrollX + width + margin) / step).rounded(.down)))
         return first..<(max(first, last) + 1)
+    }
+
+    /// 列のうち、時刻列を除いた格子の中で焦点を当てられる範囲。
+    static func tvColumnFocusRange(_ column: Int, scrollX: Double, visibleWidth: Double) -> Range<Double>? {
+        let left = Double(column) * (tvColumnWidth + tvColumnGap) - scrollX
+        let lower = max(0, left)
+        let upper = min(visibleWidth, left + tvColumnWidth)
+        return lower < upper ? lower..<upper : nil
+    }
+
+    /// 格子の端の的は、次の列があって直接焦点を移せない方向にだけ出す。
+    static func tvNeedsColumnEdgeTarget(neighbor: Int?, scrollX: Double, visibleWidth: Double) -> Bool {
+        guard let neighbor, visibleWidth > 0 else { return false }
+        return tvColumnFocusRange(neighbor, scrollX: scrollX, visibleWidth: visibleWidth) == nil
+    }
+
+    /// 選択列を表示したまま、左右の次の列も見えるところまで送る。
+    static func tvFollowColumnOffset(
+        scrollX: Double, visibleWidth: Double, column: Int, previous: Int?, next: Int?
+    ) -> Double {
+        let margin = 40.0
+        let step = tvColumnWidth + tvColumnGap
+        var x = scrollX
+        let left = Double(column) * step
+        let right = left + tvColumnWidth
+        if left < x + margin {
+            x = left - margin
+        } else if right > x + visibleWidth - margin {
+            x = right - visibleWidth + margin
+        }
+        if let next, Double(next) * step > x + visibleWidth - margin {
+            x = Double(next) * step - visibleWidth + margin
+        }
+        if let previous, Double(previous) * step + tvColumnWidth < x + margin {
+            x = Double(previous) * step + tvColumnWidth - margin
+        }
+        // 幅が列より狭い場合は、表示範囲を選択列の内側に置く。
+        let lower = min(left, right - visibleWidth)
+        let upper = max(left, right - visibleWidth)
+        return min(max(x, lower), upper)
+    }
+
+    /// 初期カーソルの列を表示するための横送り。番組がなければ左端のままにする。
+    static func tvInitialScrollX(column: Int?, visibleWidth: Double, columnCount: Int) -> Double {
+        guard let column else { return 0 }
+        let x = tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column, previous: nil, next: nil
+        )
+        let contentWidth = Double(columnCount) * (tvColumnWidth + tvColumnGap) - tvColumnGap
+        return min(max(0, x), max(0, contentWidth - visibleWidth))
     }
 
     static func offset(
@@ -96,6 +147,33 @@ nonisolated enum GuideLayout {
     /// 開いたときに送る位置 (pt)。いまの線が上から 1/4 に来る所。負にならないようにする。
     static func initialScrollOffset(nowOffset: Double, viewportHeight: Double) -> Double {
         max(0, nowOffset - viewportHeight / 4)
+    }
+
+    /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
+    /// 放送の空きで基準の時刻と選んだ番組が離れすぎる場合は、見出しを優先する。
+    static func tvFollowOffset(
+        scrollY: Double, viewportHeight: Double, anchorY: Double, cell: ClosedRange<Double>?, headingHeight: Double
+    ) -> Double {
+        let margin = min(40, viewportHeight / 2)
+        let y = min(max(scrollY, anchorY - viewportHeight + margin), anchorY - margin)
+        guard let cell, headingHeight > 0, headingHeight <= viewportHeight else { return y }
+        let headingLower = cell.lowerBound + headingHeight - viewportHeight
+        let headingUpper = cell.upperBound - headingHeight
+        let lower = max(anchorY - viewportHeight, headingLower)
+        let upper = min(anchorY, headingUpper)
+        guard lower <= upper else { return min(max(y, headingLower), headingUpper) }
+        return min(max(y, lower), upper)
+    }
+
+    /// 見出しをマスの見えている上端へ寄せる。見出し全体が収まらないときは表示しない。
+    static func tvCellContentInset(
+        viewportTop: Double, viewportHeight: Double, cellHeight: Double, headingHeight: Double
+    ) -> Double? {
+        let top = max(0, viewportTop)
+        let bottom = min(cellHeight, viewportTop + viewportHeight)
+        // 送り先から座標を引き直したときの丸め誤差を許す。
+        guard top + headingHeight <= bottom + 0.000_001 else { return nil }
+        return top
     }
 
     /// いまの線の左に出す数字。iPhone が分だけ (「21」)、iPad が `H:mm` (「15:21」)

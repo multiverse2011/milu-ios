@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// ライブのメニュー (TV-Live)。映像の上に、いまの局・操作の列・種別ごとの局の列を出す。
-/// リモコンの 下・決定で開き、上でいまの局にフォーカスする (3.5.1)。
+/// リモコンの 下・上で開き、上でいまの局にフォーカスする (3.5.1)。
 /// tvOS ではタブの根でもこれを出し、映像を観ていないときの局一覧にする。
 struct TVLiveMenuView: View {
     let model: LiveModel
@@ -200,9 +200,12 @@ struct TVLiveMenuView: View {
                 .padding(.top, 24)
                 .padding(.leading, 4)
             ScrollView(.horizontal) {
-                HStack(spacing: 26) {
-                    ForEach(model.services.filter { $0.type == type }, id: \.id) { service in
-                        stationCard(service)
+                // 一番高いカードに行の高さを揃え、各カードはその高さまで広げる。
+                Grid(alignment: .topLeading, horizontalSpacing: 26) {
+                    GridRow {
+                        ForEach(model.services.filter { $0.type == type }, id: \.id) { service in
+                            stationCard(service)
+                        }
                     }
                 }
                 .padding(.vertical, 16)
@@ -254,9 +257,11 @@ struct TVLiveMenuView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
-            .frame(width: 440, height: 200, alignment: .topLeading)
+            .frame(width: 440, alignment: .leading)
+            .frame(minHeight: 200, maxHeight: .infinity, alignment: .topLeading)
         }
         .buttonStyle(.card)
         .focused($focus, equals: .station(service.id))

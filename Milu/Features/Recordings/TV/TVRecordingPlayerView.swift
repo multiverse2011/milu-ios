@@ -3,10 +3,10 @@ import SwiftUI
 /// tvOS の録画・追っかけの再生 (TV-Player・TV-Chase・TV-PlayerEnd)。
 /// リモコンの割り当ては design.md 3.5.1: 左右で 10 秒戻す/送る、下でシークバーと操作の列、
 /// 決定で一時停止・再開、決定の長押しで番組の詳細、戻るで一覧へ。
-/// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻る (上・Menu) と隠す。
+/// 操作の列はふだん出さない。下・上で出して札へ焦点を移し、映像の面へ戻ると自動で隠す。Menu ではすぐ隠す。
 /// 一時停止中は自動では隠さない。止まったとき・最後まで観たときは、その画面のボタンを出す。
-/// 操作の列の高さ (controlsHeight) から字幕の持ち上げ量を決めているので、題と操作の列の字は固定の大きさのままにする。
-/// 題だけは放送の字なので .title2 に揃える (旧 44pt。行の高さの差は controlsHeight に足してある)。
+/// 字幕の持ち上げ量は操作の列の上端と映像面の実寸から決めるので、題と操作の列の字は
+/// テキストスタイルのまま拡大してよい。題だけは放送の字なので .title2 に揃える (旧 44pt)。
 struct TVRecordingPlayerView: View {
     let session: RecordingSession
     /// ここから録画を消した。呼び手は、消えた録画へ戻ろうとしていたなら手放す
@@ -24,6 +24,8 @@ struct TVRecordingPlayerView: View {
     @State private var controlsVisible = false
     @State private var hideTask: Task<Void, Never>?
     @State private var focusTask: Task<Void, Never>?
+    @State private var videoFrame: CGRect?
+    @State private var controlsTop: CGFloat?
     @FocusState private var surfaceFocused: Bool
     @FocusState private var control: Control?
 
@@ -37,8 +39,8 @@ struct TVRecordingPlayerView: View {
         GeometryReader { proxy in
             ZStack {
                 Color.black.ignoresSafeArea()
-                video(height: proxy.size.height)
-                if controlsVisible, session.stop == nil, !session.finished {
+                video(safeAreaBottom: proxy.frame(in: .global).maxY)
+                if showsControls {
                     shade(height: 520, opacity: 0.78)
                     controls
                 }
@@ -58,24 +60,30 @@ struct TVRecordingPlayerView: View {
         }
         .onExitCommand {
             // 戻る: 出ているものを閉じる。何も出ていなければ再生の画面を閉じる (3.5.1)
-            if controlsVisible, session.stop == nil, !session.finished {
+            if showsControls {
                 hideControls()
             } else {
                 close()
             }
         }
         .task { await session.start() }
-        .onAppear { surfaceFocused = true }
+        // 開いた直後の焦点は映像の面に置く (純正と同じ)。開いた 1 回だけ当てる。
+        // defaultFocus は焦点が外れたとき (操作の列やメニューへ移ったとき) にも既定を当て直そうとし、
+        // 面が操作の列を出している間も focusable なままなので、札やメニューから焦点を奪う。
+        // onAppear は焦点の仕組みより先に走ることがあるので、1 度譲ってから当てる
+        .task {
+            await Task.yield()
+            surfaceFocused = true
+        }
         .onDisappear {
             hideTask?.cancel()
             focusTask?.cancel()
             Task { await session.close() }
         }
-        // 札から映像の面へ戻ったら、再生中は操作の列を隠す。メニューを閉じたときも焦点が
-        // 面へ戻ることがあり、すぐ隠すと選んだ直後に列が消えてボタンが効かないように見える。
-        // ここは 4 秒の自動で隠す仕組みに任せる (詳細の sheet は onDismiss で即時に隠す)
+        // メニューを閉じると焦点が映像の面へ戻ることがあるので、列は 4 秒後に隠す。
+        // 詳細の sheet を閉じたときは onDismiss ですぐ隠す。
         .onChange(of: surfaceFocused) { _, focused in
-            guard focused, controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
+            guard focused, showsControls, session.isPlaying else { return }
             scheduleHide()
         }
         // 一時停止したら操作の列を出したままにする (再生が始まったらまた隠してよい)
@@ -123,14 +131,19 @@ struct TVRecordingPlayerView: View {
 
     // MARK: - 映像とリモコン
 
-    private func video(height: CGFloat) -> some View {
+    private var showsControls: Bool {
+        controlsVisible && session.stop == nil && !session.finished
+    }
+
+    private func video(safeAreaBottom: CGFloat) -> some View {
         ZStack {
             VideoSurface(
                 layer: session.displayLayer,
                 overlay: session.finished ? nil : captionImage,
                 // 操作の列を出している間は、字幕をその上まで持ち上げる (3.5.2)
-                overlayOffset: controlsVisible ? -captionLift(height: height) : 0
+                overlayOffset: showsControls ? -captionLift(safeAreaBottom: safeAreaBottom) : 0
             )
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { videoFrame = $0 }
             // 映像の面。ここにフォーカスがある間、左右で 10 秒、決定で一時停止・長押しで詳細。
             // 止まった・最後まで観たときはボタンへフォーカスを渡す
             Color.clear
@@ -152,12 +165,17 @@ struct TVRecordingPlayerView: View {
                         break
                     }
                 }
-                // 長押しとタップは排他。長押しのあとに来る決定で再生/一時停止を動かさない (3.5.1)
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.6)
-                        .onEnded { _ in openDetail() }
-                        .exclusively(before: TapGesture().onEnded { session.togglePlayCommand() })
-                )
+                // 2 つを `exclusively(before:)` で組むと実機の決定で一時停止しなかった。
+                // 前の LongPressGesture が押下を先に取り、0.6 秒に届かない短い押下が Tap に渡らないためと見ている (推測)。
+                // ライブの映像の面と同じく、2 つを別々に受ける
+                .onTapGesture {
+                    // 長押しで詳細を開いたあとに離した決定は受け止める
+                    guard !showDetail else { return }
+                    session.togglePlayCommand()
+                }
+                .onLongPressGesture(minimumDuration: 0.6) {
+                    openDetail()
+                }
         }
         .ignoresSafeArea()
     }
@@ -175,24 +193,31 @@ struct TVRecordingPlayerView: View {
         .ignoresSafeArea()
     }
 
-    /// 字幕を持ち上げる量。操作の列 (下から約 355pt) の上へ、字幕の面の字の下端が来るようにする
-    private func captionLift(height: CGFloat) -> CGFloat {
-        guard height > 0, let page = session.captionPage else { return 0 }
+    /// 字幕の下端を映像面の座標から求め、同じ座標系で操作の列の上端と比べる。
+    private func captionLift(safeAreaBottom: CGFloat) -> CGFloat {
+        guard let videoFrame, videoFrame.height > 0, let page = session.captionPage else { return 0 }
         let span = CaptionLayout.inkSpan(page: page)
-        let top = height - Self.controlsHeight
-        return max(0, span.bottom * height - top + 16)
+        // 355pt は列の初回計測までの暫定値 (題 1 行の見積り)。再表示時は前回の実測値を使う。
+        return CaptionLayout.liftAboveControls(
+            normalizedBottom: span.bottom,
+            videoFrame: videoFrame,
+            controlsTop: controlsTop ?? safeAreaBottom - 355
+        )
     }
-
-    /// 操作の列の高さの見積り (題・シークバー・時刻・札・下の余白)。
-    /// 340 は題が旧 44pt のときの値。DenpaFont の行の高さ (1.122 × 大きさ) の差 14.6 を足す。
-    /// 題が 2 行になると差は約 29 になる (340 は 1 行の前提なので、実寸は画面で測る)
-    private static let controlsHeight: CGFloat = 355
 
     // MARK: - 操作の層
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
+            column
+        }
+        .padding(.horizontal, 96)
+    }
+
+    /// 下に並ぶ列。字幕の持ち上げ量は、題が 1 行でも 2 行でも合うこの実寸から取る
+    private var column: some View {
+        VStack(alignment: .leading, spacing: 0) {
             titleBlock
             scrubber
                 .padding(.top, 52)
@@ -201,8 +226,8 @@ struct TVRecordingPlayerView: View {
             pillRow
                 .padding(.top, 18)
         }
-        .padding(.horizontal, 96)
         .padding(.bottom, 48)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { controlsTop = $0 }
     }
 
     private var titleBlock: some View {
@@ -310,7 +335,7 @@ struct TVRecordingPlayerView: View {
     }
 
     private var pillRow: some View {
-        // 7 個になっても 1 行に収まるよう、間を 12 にする (下に幅の見積り)
+        // ボタンが 7 個並ぶ場合に備え、間を 12 に詰める。
         HStack(spacing: 12) {
             // 動かす (選ばない) ものはボタンのまま
             pill(session.isPlaying ? "一時停止" : "再生", tag: .playPause) {
@@ -634,7 +659,7 @@ struct TVRecordingPlayerView: View {
     /// 詳細 (sheet) を閉じたとき。再生中で列が出ていれば、以前と同じくすぐ隠す。
     /// メニューの閉じ際は sheet ではないので、こちらとは区別できる
     private func detailDismissed() {
-        guard controlsVisible, session.isPlaying, session.stop == nil, !session.finished else { return }
+        guard showsControls, session.isPlaying else { return }
         hideControls()
     }
 

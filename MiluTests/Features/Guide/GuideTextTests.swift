@@ -1,4 +1,8 @@
 import Foundation
+#if os(tvOS)
+import SwiftUI
+import UIKit
+#endif
 import Testing
 
 @testable import Milu
@@ -95,30 +99,55 @@ import Testing
         }
     }
 
+    #if os(tvOS)
     @Test func tvCellLinesFitInsideTheCell() {
-        // TV-Guide は 1 分 4.6pt。30 分のマス (138pt) は題 2 行 + 説明 1 行
-        #expect(GuideText.tvCellLines(height: 138).title == 2)
-        #expect(GuideText.tvCellLines(height: 138).description == 1)
-        // 1 時間のマス (276pt) は題 2 行 + 説明 6 行
-        #expect(GuideText.tvCellLines(height: 276).title == 2)
-        #expect(GuideText.tvCellLines(height: 276).description == 6)
+        // 間隔 4pt を引いた 30 分 (134pt) と 1 時間 (272pt) のマスを検証する。
+        for (minutes, descriptionLines) in [(30.0, 1), (60.0, 6)] {
+            let height = minutes * GuideLayout.tvPointsPerMinute - GuideLayout.tvColumnGap
+            let lines = GuideText.tvCellLines(height: height)
+            #expect(lines.title == 2)
+            #expect(lines.description == descriptionLines)
+        }
         // 15 分のマス (69pt) は題 1 行だけ
         #expect(GuideText.tvCellLines(height: 69).title == 1)
         #expect(GuideText.tvCellLines(height: 69).description == 0)
         // 1 行も入らないマスは何も出さない
         #expect(GuideText.tvCellLines(height: 20).title == 0)
 
-        // どの高さでも、出る行がマスの内側に収まる
-        let titleLine = 34.0, detailLine = 30.0, spacing = 4.0
+        let traits = UITraitCollection(preferredContentSizeCategory: .large)
         for height in stride(from: 1.0, through: 600.0, by: 0.5) {
             let lines = GuideText.tvCellLines(height: height)
-            var used = Double(lines.title) * titleLine
-            if lines.description > 0 { used += spacing + Double(lines.description) * detailLine }
             if lines.title > 0 {
-                #expect(used <= height - 20)
+                #expect(realHeight(lines, traits: traits) <= height - 20)
             }
         }
     }
+
+    /// 文字の大きさの設定を上げても、見積りは実フォントの行の高さに追従してはみ出さない
+    @Test func tvCellLinesFollowTheTextSize() {
+        let height = 60 * GuideLayout.tvPointsPerMinute - GuideLayout.tvColumnGap
+        let standard = GuideText.tvCellLines(height: height, dynamicTypeSize: .large)
+        let enlarged = GuideText.tvCellLines(height: height, dynamicTypeSize: .accessibility1)
+        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityMedium)
+        #expect(enlarged.title > 0)
+        #expect(enlarged.title + enlarged.description < standard.title + standard.description)
+        #expect(realHeight(enlarged, traits: traits) <= height - 20)
+    }
+
+    /// 実フォント (Denpa Font) の行の高さで並べたときの高さ。実装の見積りとは別に UIFont から測る
+    private func realHeight(_ lines: (title: Int, description: Int), traits: UITraitCollection) -> Double {
+        var used = Double(lines.title) * Double(denpaLineHeight(system: .callout, traits: traits))
+        if lines.description > 0 {
+            used += 4 + Double(lines.description) * Double(denpaLineHeight(system: .caption1, traits: traits))
+        }
+        return used
+    }
+
+    private func denpaLineHeight(system style: UIFont.TextStyle, traits: UITraitCollection) -> CGFloat {
+        let size = UIFont.preferredFont(forTextStyle: style, compatibleWith: traits).pointSize
+        return UIFont(name: DenpaFont.postScriptName, size: size)?.lineHeight ?? size
+    }
+    #endif
 
     @Test func extendedItemsPutPreferredFirstThenSorted() {
         let extended = ["出演者": "A", "その他": "X", "番組内容": "B", "解説": "Y"]

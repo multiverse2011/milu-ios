@@ -3,6 +3,8 @@ import SwiftUI
 /// Apple TV の再生の画面 (TV-LiveHud・TV-LiveTuning・TV-LiveDetail)。
 /// タブの根 (局の一覧) から外して fullScreenCover で出す。映像だけの間は
 /// 左上の「‹ ライブ」(サイドバーをたたんだタブバー) をシステムが出さない (#72)。
+/// リモコンは 決定・再生/一時停止で一時停止と再開 (再開はその時点のライブ)、
+/// 下・上でメニュー、決定の長押しで詳細、戻るで一覧へ (3.5.1)。
 struct TVLivePlayerView: View {
     let model: LiveModel
     /// 映像だけのときの Menu。再生をやめて局の一覧へ戻る
@@ -10,9 +12,11 @@ struct TVLivePlayerView: View {
 
     @Environment(AppModel.self) private var app
     @State private var overlay: Overlay = .none
-    /// メニューを開いたときのフォーカスの的 (上は局の列、下・決定は操作の列)
+    /// メニューを開いたときのフォーカスの的 (上は局の列、下は操作の列)
     @State private var menuTarget: TVLiveFocus = .quality
     @State private var showsHud = false
+    /// 長押しの決定を消費したか (番組情報が無く詳細を開けなかった局で、離した決定を一時停止に使わない)
+    @State private var longPressConsumed = false
     @State private var hudTask: Task<Void, Never>?
     @FocusState private var focus: TVLiveFocus?
 
@@ -29,6 +33,12 @@ struct TVLivePlayerView: View {
             player
         }
         .ignoresSafeArea()
+        // 再生/一時停止ボタン。決定と同じ入口を通す。Now Playing の経路からも同じ押下が届くことがあるので、
+        // 二重に動かないよう PlaybackSession で受け止める。
+        // メニュー・詳細を開いている間も効かせる (純正と同じ。決定は overlay の間は効かせない)
+        .onPlayPauseCommand {
+            model.togglePlayPause()
+        }
         // Menu: オーバーレイが開いていれば閉じ、映像だけなら再生をやめて局の一覧へ戻る (3.5.1)。
         // fullScreenCover の根で受けないと、システムに画面ごと閉じられる
         .onExitCommand {
@@ -66,6 +76,9 @@ struct TVLivePlayerView: View {
             video
             if isTuning {
                 tuning
+            }
+            if isPaused, overlay == .none {
+                paused
             }
             if showsBand {
                 TVLiveBand(
@@ -141,14 +154,23 @@ struct TVLivePlayerView: View {
             default: break
             }
         }
+        // 決定で一時停止・再開 (再開はその時点のライブ)。メニューは下・上で開く (3.5.1)
         .onTapGesture {
+            // 長押しで詳細を開けなかった局では、離したときの決定を消費する
+            guard !longPressConsumed else {
+                longPressConsumed = false
+                return
+            }
             guard overlay == .none else { return }
-            openMenu(focus: .quality)
+            model.togglePlayPause()
         }
-        // 決定の長押しで番組の詳細 (3.5.1)
+        // 決定の長押しで番組の詳細 (3.5.1)。詳細を開けたときの離した決定は overlay で受け止める
         .onLongPressGesture(minimumDuration: 0.6) {
             guard overlay == .none else { return }
-            openDetail()
+            longPressConsumed = !openDetail()
+        } onPressingChanged: { pressing in
+            // 離したタップが来ないまま次の押下に移っても、控えを残して 1 回空振りさせない
+            if pressing { longPressConsumed = false }
         }
         .defaultFocus($focus, .video)
     }
@@ -157,6 +179,25 @@ struct TVLivePlayerView: View {
     private var isTuning: Bool {
         guard let session = model.session else { return false }
         return session.stop == nil && !session.showReconnect && session.phase == .loading
+    }
+
+    /// 一時停止中。接続を閉じているので絵が残らない。止まっていることが分かる面を出す
+    private var isPaused: Bool {
+        model.session?.stop == nil && model.session?.phase == .paused
+    }
+
+    private var paused: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "pause.fill")
+                .font(.system(size: 64, weight: .semibold))
+            Text("一時停止中")
+                .font(.system(size: 34, weight: .semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 64)
+        .padding(.vertical, 48)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
+        .allowsHitTesting(false)
     }
 
     private var showsBand: Bool {
@@ -190,9 +231,11 @@ struct TVLivePlayerView: View {
         overlay = .menu
     }
 
-    private func openDetail() {
-        guard model.current?.now != nil else { return }
+    @discardableResult
+    private func openDetail() -> Bool {
+        guard model.current?.now != nil else { return false }
         overlay = .detail
+        return true
     }
 
     private func closeOverlay() {

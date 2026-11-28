@@ -97,6 +97,11 @@ import Testing
         #expect(!TVReading.hasMore(visibleMaxY: 500, contentHeight: 300, bottomPadding: 0))
     }
 
+    @Test func ライセンスの下余白だけなら続きの案内を出さない() {
+        #expect(!TVReading.hasMore(visibleMaxY: 960, contentHeight: 1000, bottomPadding: 40))
+        #expect(TVReading.hasMore(visibleMaxY: 959, contentHeight: 1000, bottomPadding: 40))
+    }
+
     @Test func OFLの全文が上限の内側の塊になる() throws {
         let url = try #require(Bundle.main.url(forResource: "OFL", withExtension: "txt"))
         let text = try String(contentsOf: url, encoding: .utf8)

@@ -550,7 +550,7 @@ import Testing
 
     #if os(iOS)
     /// #39 と #32 の両立: 全画面をやめたあと、inactive では止めず、inactive→active や background→active でも勝手に全画面へ戻らない
-    @Test func handleLifecycleKeepsActiveOnInactiveAndDoesNotReenterFullscreenOnSceneResume() async {
+    @Test func handleLifecycleKeepsActiveOnInactiveAndDoesNotReenterFullscreenOnSceneResume() async throws {
         let (app, defaults) = makeApp(makeServicesTransport())
         defaults.set(true, forKey: OrientationLock.autoLandscapeKey)
         let model = LiveModel(defaults: defaults, isPhone: true, nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()))
@@ -560,10 +560,8 @@ import Testing
         }
 
         model.handleLifecycle(isSelected: true, appPhase: .active, app: app)
-        for _ in 0..<20 where model.session == nil {
-            await Task.yield()
-        }
-        let session = try! #require(model.session)
+        await waitUntil { model.session != nil }
+        let session = try #require(model.session)
         #expect(model.showFullscreen)
 
         // 「全画面をやめる」で縦に戻す
@@ -581,9 +579,7 @@ import Testing
         model.handleLifecycle(isSelected: true, appPhase: .background, app: app)
         #expect(!model.started)
         model.handleLifecycle(isSelected: true, appPhase: .active, app: app)
-        for _ in 0..<20 where session.phase == .idle {
-            await Task.yield()
-        }
+        await waitUntil { model.started && session.phase != .idle }
         #expect(model.started)
         #expect(!model.showFullscreen)
     }

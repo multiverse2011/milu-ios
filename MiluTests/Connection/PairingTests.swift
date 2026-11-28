@@ -103,9 +103,7 @@ extension PairingTests {
             tokenIndex: index
         )
         model.start()
-        for _ in 0..<100 where model.error == nil {
-            await Task.yield()
-        }
+        await waitUntil { model.error != nil }
         #expect(model.error == "この接続先ではペアリングできません。家の Wi-Fi から、192.168.x.x:3000 のような denpa のアドレスで接続してください。")
         #expect(codes.value == 1)
     }
