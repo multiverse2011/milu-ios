@@ -101,6 +101,20 @@ nonisolated enum GuideCursorMotion {
         return nil
     }
 
+    /// 読み直しで番組が消えたら、残った番組とその中の基準時刻に置き直す。
+    static func repairedCursor(
+        _ cursor: GuideCursor?, from column: Int, anchor: Int64, in services: [GuideService]
+    ) -> GuideCursor? {
+        if let cursor, program(cursor, in: services) != nil { return cursor }
+        guard let replacement = fallbackCursor(from: column, anchor: anchor, in: services),
+              let (_, program) = program(replacement, in: services) else { return nil }
+        let last = program.endAt > program.startAt ? program.endAt - 1 : program.startAt
+        return GuideCursor(
+            column: replacement.column, programID: replacement.programID,
+            anchor: min(max(anchor, program.startAt), last)
+        )
+    }
+
     /// その時刻に入っている番組。無ければ、その時刻までで最後に始まった番組 (それも無ければ先頭)。
     private static func nearest(to time: Int64, in programs: [GuideProgram]) -> GuideProgram? {
         if let covering = programs.first(where: { $0.startAt <= time && time < $0.endAt }) {

@@ -146,7 +146,7 @@ private struct TVGuideBoard: View {
                 scrollHigh = target
             }
         }
-        // 読み直しで焦点の列が使えなくなったら (番組が消えた・局が減った)、近い列へ移す
+        // 読み直しで選んだ番組や局が消えたら、カーソルと送りをそろえ直す
         .onChange(of: guide.services) { _, services in
             repairFocus(services, now: Date())
         }
@@ -487,18 +487,10 @@ private struct TVGuideBoard: View {
     /// いまのカーソル。読み直しで番組が消えていたら、焦点の列 (無ければ最後に焦点のあった列) で
     /// 作り直し、その列も使えなければ近い列へ寄せる (先頭の局・いまの時刻へは跳ばさない)
     private func resolvedCursor(now: Date) -> GuideCursor? {
-        if let cursor, GuideCursorMotion.program(cursor, in: guide.services) != nil {
-            return cursor
-        }
         let time = Int64(now.timeIntervalSince1970 * 1000)
         let anchor = cursor?.anchor ?? time
-        if let column = lastColumn ?? focusColumn {
-            if let rebuilt = GuideCursorMotion.cursor(at: column, anchor: anchor, in: guide.services) {
-                return rebuilt
-            }
-            if let fallback = GuideCursorMotion.fallbackCursor(from: column, anchor: anchor, in: guide.services) {
-                return fallback
-            }
+        if let column = lastColumn ?? focusColumn ?? cursor?.column {
+            return GuideCursorMotion.repairedCursor(cursor, from: column, anchor: anchor, in: guide.services)
         }
         return GuideCursorMotion.initial(in: guide.services, now: time)
     }
@@ -509,27 +501,20 @@ private struct TVGuideBoard: View {
         return nil
     }
 
-    /// 読み直しで焦点の列が使えなくなったら、近い列へ寄せる。的が消えた列に留まると cursor と
-    /// 食い違って格子が無反応になる。focus は的が消えた時点で nil に落ち得るので、判断は最後に
-    /// 焦点のあった列 (`lastColumn`) でする。focus を移すのは格子が焦点を持っているときだけで、
-    /// サイドバー・詳細・チップの焦点は利用者のものなので触らない
+    /// 読み直しで選んだ番組が消えたら、同じ列か近い列の番組を選び直して送る。
+    /// 的が消えると focus が nil に落ち得るので、最後に焦点のあった列も使う。
+    /// サイドバー・詳細・チップに焦点がある間は、カーソルと送りだけを直す。
     private func repairFocus(_ services: [GuideService], now: Date) {
-        guard let column = lastColumn ?? focusColumn,
-              !GuideCursorMotion.isUsable(column, in: services)
-        else { return }
+        guard let column = lastColumn ?? focusColumn ?? cursor?.column else { return }
         let anchor = cursor?.anchor ?? Int64(now.timeIntervalSince1970 * 1000)
-        guard let target = GuideCursorMotion.fallbackCursor(from: column, anchor: anchor, in: services) else {
-            withAnimation(nil) {
-                cursor = nil
-                lastColumn = nil
-            }
-            return
-        }
+        let target = GuideCursorMotion.repairedCursor(cursor, from: column, anchor: anchor, in: services)
+        guard target != cursor || (target == nil && lastColumn != nil) else { return }
         // アニメーション中に読み直しが来ても、カーソルの付け替えは即座にする
         withAnimation(nil) {
             cursor = target
-            lastColumn = target.column
+            lastColumn = target?.column
         }
+        guard let target else { return }
         follow(target, in: services, animated: false)
         if focusColumn != nil, opened == nil {
             focus = .column(target.column)
@@ -705,25 +690,12 @@ private struct TVGuideBoard: View {
     private func followTarget(_ cursor: GuideCursor, in services: [GuideService]) -> CGPoint? {
         let column = cursor.column
         guard GuideCursorMotion.isUsable(column, in: services) else { return nil }
-        let margin = 40.0
         let visibleWidth = max(Double(viewport.width) - GuideLayout.tvTimeWidth, 1)
-        var x = scroll.x
-        let left = Double(column) * columnStep()
-        let right = left + GuideLayout.tvColumnWidth
-        if left < x + margin {
-            x = left - margin
-        } else if right > x + visibleWidth - margin {
-            x = right - visibleWidth + margin
-        }
-        // 次に移る列を margin だけ見せる
-        if let next = GuideCursorMotion.adjacentColumn(from: column, in: services, by: 1),
-           Double(next) * columnStep() > x + visibleWidth - margin {
-            x = Double(next) * columnStep() - visibleWidth + margin
-        }
-        if let previous = GuideCursorMotion.adjacentColumn(from: column, in: services, by: -1),
-           Double(previous) * columnStep() + GuideLayout.tvColumnWidth < x + margin {
-            x = Double(previous) * columnStep() + GuideLayout.tvColumnWidth - margin
-        }
+        let x = GuideLayout.tvFollowColumnOffset(
+            scrollX: scroll.x, visibleWidth: visibleWidth, column: column,
+            previous: GuideCursorMotion.adjacentColumn(from: column, in: services, by: -1),
+            next: GuideCursorMotion.adjacentColumn(from: column, in: services, by: 1)
+        )
         let anchorY = GuideLayout.offset(
             of: Double(cursor.anchor),
             from: from,

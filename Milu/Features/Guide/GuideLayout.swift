@@ -50,6 +50,32 @@ nonisolated enum GuideLayout {
         return first..<(max(first, last) + 1)
     }
 
+    /// 選択列を表示したまま、左右の次の列も見えるところまで送る。
+    static func tvFollowColumnOffset(
+        scrollX: Double, visibleWidth: Double, column: Int, previous: Int?, next: Int?
+    ) -> Double {
+        let margin = 40.0
+        let step = tvColumnWidth + tvColumnGap
+        var x = scrollX
+        let left = Double(column) * step
+        let right = left + tvColumnWidth
+        if left < x + margin {
+            x = left - margin
+        } else if right > x + visibleWidth - margin {
+            x = right - visibleWidth + margin
+        }
+        if let next, Double(next) * step > x + visibleWidth - margin {
+            x = Double(next) * step - visibleWidth + margin
+        }
+        if let previous, Double(previous) * step + tvColumnWidth < x + margin {
+            x = Double(previous) * step + tvColumnWidth - margin
+        }
+        // 幅が列より狭い場合は、表示範囲を選択列の内側に置く。
+        let lower = min(left, right - visibleWidth)
+        let upper = max(left, right - visibleWidth)
+        return min(max(x, lower), upper)
+    }
+
     static func offset(
         of time: Double,
         from rangeStart: Double,

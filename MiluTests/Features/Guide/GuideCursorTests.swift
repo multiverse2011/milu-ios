@@ -209,6 +209,27 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.selectedCursor(inColumn: 0, from: GuideCursor(column: 0, programID: 99, anchor: 0), in: overlapping) == nil)
     }
 
+    @Test func reloadRepairUsesTheRemainingProgramAtAVisibleTime() {
+        let hour: Int64 = 3_600_000
+        let previous = GuideCursor(column: 0, programID: 2, anchor: 23 * hour)
+        let updated = [service(1, [(id: 1, start: 17 * hour, end: 18 * hour)])]
+        let target = GuideCursorMotion.repairedCursor(previous, from: 0, anchor: previous.anchor, in: updated)
+        #expect(target?.programID == 1)
+        #expect(target?.anchor == 18 * hour - 1)
+
+        let next = GuideCursorMotion.repairedCursor(
+            previous, from: 0, anchor: previous.anchor,
+            in: [service(1, [(id: 3, start: 24 * hour, end: 25 * hour)])]
+        )
+        #expect(next == GuideCursor(column: 0, programID: 3, anchor: 24 * hour))
+    }
+
+    @Test func reloadRepairPreservesASelectedProgramAndItsAnchor() {
+        let current = GuideCursor(column: 1, programID: 5, anchor: 13 * 3_600_000)
+        #expect(GuideCursorMotion.repairedCursor(current, from: 1, anchor: current.anchor, in: services) == current)
+        #expect(GuideCursorMotion.repairedCursor(current, from: 1, anchor: current.anchor, in: []) == nil)
+    }
+
     @Test func staleCursorIsNotFound() {
         #expect(GuideCursorMotion.program(GuideCursor(column: 0, programID: 99, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.program(GuideCursor(column: 9, programID: 1, anchor: 0), in: services) == nil)

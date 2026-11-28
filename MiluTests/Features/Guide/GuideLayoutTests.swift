@@ -147,6 +147,18 @@ struct GuideLayoutTests {
         #expect(GuideLayout.menuLabel(for: days[7], today: now, calendar: calendar, locale: en) == "Sat 21")
     }
 
+    @Test func tvHorizontalFollowKeepsTheSelectedColumnAcrossAGap() {
+        let width = 850 - GuideLayout.tvTimeWidth
+        let step = GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap
+        let right = GuideLayout.tvFollowColumnOffset(scrollX: 0, visibleWidth: width, column: 5, previous: 0, next: nil)
+        #expect(right <= 5 * step)
+        #expect(right + width >= 5 * step + GuideLayout.tvColumnWidth)
+
+        let left = GuideLayout.tvFollowColumnOffset(scrollX: right, visibleWidth: width, column: 0, previous: nil, next: 5)
+        #expect(left <= 0)
+        #expect(left + width >= GuideLayout.tvColumnWidth)
+    }
+
     @Test func tvColumnsStayInsideTheGuide() {
         // 局が減った (読み直しの前後) ときも、番組表の外の列は作らない
         for count in 1...6 {
