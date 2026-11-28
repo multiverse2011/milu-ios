@@ -39,7 +39,9 @@ func waitUntil(
     _ condition: () -> Bool,
     sourceLocation: SourceLocation = #_sourceLocation
 ) async {
-    for _ in 0..<400 where !condition() {
+    // 回数ではなく時計で待つ。CI はカバレッジの計測で遅くなるので、余裕を持たせる
+    let deadline = ContinuousClock.now + .seconds(10)
+    while !condition(), ContinuousClock.now < deadline {
         try? await Task.sleep(for: .milliseconds(5))
     }
     if !condition() {

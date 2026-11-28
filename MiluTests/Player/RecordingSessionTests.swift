@@ -1075,4 +1075,83 @@ import Testing
         #expect(session.selectedRung == 2)
         await session.close()
     }
+
+    // MARK: - 読み込みの失敗・音声・速度
+
+    /// `playback` を読めなければ、サーバの言葉で止めてやり直せるようにする。やり直すと最初から読む
+    @Test(arguments: [
+        (500, #"{"error":"x","message":"録画が見つかりません"}"#, "録画が見つかりません"),
+        (500, "", "再生できません"),
+    ])
+    func playbackFailureStopsWithMessageAndRetryReadsAgain(status: Int, body: String, expected: String) async throws {
+        let fails = Box(true)
+        let transport = StubTransport { request in
+            guard request.url?.lastPathComponent == "playback" else { return reply(request, 200) }
+            return fails.value ? reply(request, status, body) : reply(request, 200, Self.playbackJSON)
+        }
+        let loaders = Loaders()
+        let (app, defaults) = makeApp(transport)
+        defer { withExtendedLifetime(app) {} }
+        let session = RecordingSession(
+            baseURL: URL(string: "http://127.0.0.1:9")!, token: nil, recording: try makeRecording(),
+            playable: [.h264], app: app, defaults: defaults,
+            nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()),
+            startStream: { loaders.all.append($0) }
+        )
+        await session.start()
+        #expect(session.stop == .init(reason: .refused(expected), retry: true))
+        #expect(loaders.all.isEmpty)
+
+        fails.value = false
+        session.retry()
+        await waitUntil { !loaders.all.isEmpty }
+        #expect(session.stop == nil)
+        #expect(loaders.last.url.path == "/api/recordings/1/stream")
+        await session.close()
+    }
+
+    /// 音声を替えたら名前を覚え、今の位置から開き直す。同じ音声を選んでも開き直さない
+    @Test func selectAudioRemembersNameAndReopens() async throws {
+        let json = """
+        {"duration":60,"axis":"encoded",
+         "audios":[{"id":"0","label":"主音声"},{"id":"1","label":"副音声"}],
+         "offers":[{"codec":"h264","way":"stream"}]}
+        """
+        let transport = StubTransport { request in
+            request.url?.lastPathComponent == "playback" ? reply(request, 200, json) : reply(request, 200)
+        }
+        let loaders = Loaders()
+        let (app, defaults) = makeApp(transport)
+        defer { withExtendedLifetime(app) {} }
+        let session = RecordingSession(
+            baseURL: URL(string: "http://127.0.0.1:9")!, token: nil, recording: try makeRecording(),
+            playable: [.h264], app: app, defaults: defaults,
+            nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()),
+            startStream: { loaders.all.append($0) }
+        )
+        await session.start()
+        #expect(session.audioTracks.map(\.label) == ["主音声", "副音声"])
+        let opened = loaders.all.count
+
+        session.selectAudio(session.audioTracks[1])
+        #expect(loaders.all.count == opened + 1)
+        #expect(params(loaders.last.url)["audio"] == "1")
+        #expect(defaults.string(forKey: "recordingAudioName") == "副音声")
+
+        session.selectAudio(session.audioTracks[1])
+        #expect(loaders.all.count == opened + 1)
+        await session.close()
+    }
+
+    @Test func setSpeedKeepsTheChosenSpeed() async throws {
+        let (session, loaders, app, _) = try makeRungSession(kind: .recording)
+        defer { withExtendedLifetime(app) {} }
+        await session.start()
+        let opened = loaders.all.count
+        session.setSpeed(2)
+        #expect(session.speed == 2)
+        // 速度は開き直さずに替える
+        #expect(loaders.all.count == opened)
+        await session.close()
+    }
 }

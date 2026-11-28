@@ -584,4 +584,118 @@ import Testing
         #expect(!model.showFullscreen)
     }
     #endif
+
+    // MARK: - 録画のボタン
+
+    private func makeRecordApp(
+        reserved: Bool = false,
+        record: @escaping @Sendable (URLRequest) -> (Data, HTTPURLResponse)
+    ) -> (AppModel, UserDefaults, StubTransport) {
+        let services = """
+        [{"id":10,"type":"GR","name":"NHK総合","remoteControlKey":1,"logo":null,
+          "live":"api/services/10/live","airing":true,"video":true,
+          "now":{"id":77,"title":"ニュース","startAt":0,"endAt":1,
+                 "reserved":\(reserved),"recording":false,"audios":[]}}]
+        """
+        let transport = StubTransport { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("api/services") { return reply(request, 200, services) }
+            if path.hasSuffix("/record") { return record(request) }
+            return reply(request, 200, "{}")
+        }
+        let (app, defaults) = makeApp(transport)
+        return (app, defaults, transport)
+    }
+
+    private func serviceLoads(_ transport: StubTransport) -> Int {
+        transport.requests.filter { $0.url?.path.hasSuffix("api/services") == true }.count
+    }
+
+    /// 録っていない番組で押すと録画を頼み、予約できなかった理由をそのまま出して一覧を読み直す
+    @Test func toggleRecordShowsServerReasonWhenNotReserved() async {
+        let (app, defaults, transport) = makeRecordApp { reply($0, 200, #"{"reserved":false,"reason":"チューナーが足りません"}"#) }
+        let model = LiveModel(defaults: defaults, nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()))
+        await model.start(app)
+        let loads = serviceLoads(transport)
+
+        model.toggleRecord()
+        await waitUntil { model.recordAlert != nil && serviceLoads(transport) > loads }
+
+        #expect(model.recordAlert == "チューナーが足りません")
+        #expect(transport.requests.contains { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("api/services/10/record") == true })
+        #expect(!model.showStopRecording)
+        model.stop()
+    }
+
+    /// 予約済みの番組で押したら、録画を頼まずに止めるかを聞く
+    @Test func toggleRecordOnReservedAsksBeforeStopping() async {
+        let (app, defaults, transport) = makeRecordApp(reserved: true) { reply($0, 200, "{}") }
+        let model = LiveModel(defaults: defaults, nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()))
+        await model.start(app)
+
+        model.toggleRecord()
+
+        #expect(model.showStopRecording)
+        #expect(!transport.requests.contains { $0.url?.path.hasSuffix("/record") == true })
+        model.stop()
+    }
+
+    /// 録画を止められなかったら、サーバの言葉で知らせる。言葉が無ければ決まりの文言
+    @Test(arguments: [
+        (#"{"error":"busy","message":"いまは止められません"}"#, "いまは止められません"),
+        ("", "しばらくしてから、もう一度お試しください。"),
+    ])
+    func stopRecordingFailureShowsMessage(body: String, expected: String) async {
+        let (app, defaults, transport) = makeRecordApp(reserved: true) { reply($0, 500, body) }
+        let model = LiveModel(defaults: defaults, nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()))
+        await model.start(app)
+
+        model.stopRecording()
+        await waitUntil { model.recordAlert != nil }
+
+        #expect(model.recordAlert == expected)
+        #expect(transport.requests.contains { $0.httpMethod == "DELETE" && $0.url?.path.hasSuffix("api/programs/77/record") == true })
+        model.stop()
+    }
+
+    // MARK: - サーバからの知らせ (SSE)
+
+    /// 局・番組・録画・予約が変わったと知らされたら一覧を読み直し、関係ない知らせでは読まない
+    @Test func listChangeEventsReloadServices() async {
+        let (app, defaults, transport) = makeRecordApp { reply($0, 200, "{}") }
+        let model = LiveModel(defaults: defaults, nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()))
+        await model.start(app)
+
+        var loads = serviceLoads(transport)
+        for name in ["services", "programs", "recordings", "reservations"] {
+            model.handle(SSEEvent(event: name, data: "{}"))
+            await waitUntil { serviceLoads(transport) > loads }
+            loads = serviceLoads(transport)
+        }
+
+        model.handle(SSEEvent(event: "chapters", data: "{}"))
+        model.handle(SSEEvent(event: "yielded", data: #"{"serviceId":20}"#))
+        model.handle(SSEEvent(event: "yielded", data: "壊れた JSON"))
+        await settle()
+        #expect(serviceLoads(transport) == loads)
+        model.stop()
+    }
+
+    // MARK: - 操作の表示
+
+    /// 再生中でなければ、出した操作を勝手に隠す予定を立てない
+    @Test func controlsToggleWithoutPlayingStaysVisible() async {
+        let (app, defaults) = makeApp(StubTransport { reply($0, 200, "[]") })
+        let model = LiveModel(defaults: defaults, nowPlaying: NowPlayingController(backend: SpyNowPlayingBackend()))
+        await model.start(app)
+
+        model.controlsVisible = false
+        model.toggleControls()
+        #expect(model.controlsVisible)
+        model.noteMenuInteraction()
+        #expect(model.controlsVisible)
+        model.toggleControls()
+        #expect(!model.controlsVisible)
+        model.stop()
+    }
 }

@@ -25,10 +25,10 @@ jobs:
         run: |
           sudo xcode-select --switch /Applications/Xcode_27.2.app
           xcodebuild -version
+      # xcodegen は mise.toml で手元と同じ版に固定する
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Xcode プロジェクトを生成する
-        run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
-          xcodegen generate
+        run: xcodegen generate
       - name: iPhone 17 で単体テストを実行する
         env:
           TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
@@ -39,6 +39,28 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 17' \
             -derivedDataPath DerivedData/ios \
             -resultBundlePath DerivedData/results/Milu-iOS.xcresult \
+            -enableCodeCoverage YES \
+            CODE_SIGN_IDENTITY=-
+      # iPhone のシミュレータは PiP を使えず、PiP のテストが飛ばされるので、iPad で走らせる
+      - name: iPad で PiP の単体テストを実行する
+        run: |
+          xcodebuild test -project Milu.xcodeproj -scheme Milu \
+            -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)' \
+            -derivedDataPath DerivedData/ios \
+            -resultBundlePath DerivedData/results/Milu-iPad-PiP.xcresult \
+            -only-testing:MiluTests/PictureInPictureTests \
+            CODE_SIGN_IDENTITY=-
+      - name: カバレッジを Job Summary に書く
+        if: success() || failure()
+        run: |
+          [ -d DerivedData/results/Milu-iOS.xcresult ] || exit 0
+          python3 -I scripts/coverage-summary.py DerivedData/results/Milu-iOS.xcresult >> "$GITHUB_STEP_SUMMARY"
+      # UI テスト (App Store のスクリーンショット) は CI で走らせないので、壊れていないかをビルドだけで確かめる
+      - name: UI テストをビルドする
+        run: |
+          xcodebuild build-for-testing -project Milu.xcodeproj -scheme MiluScreenshots \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath DerivedData/ios \
             CODE_SIGN_IDENTITY=-
       - name: 失敗・中断時のテスト結果を保存する
         if: failure() || cancelled()
@@ -62,10 +84,10 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_27.2.app
           xcodebuild -version
           xcrun simctl list runtimes
+      # xcodegen は mise.toml で手元と同じ版に固定する
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
       - name: Xcode プロジェクトを生成する
-        run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
-          xcodegen generate
+        run: xcodegen generate
       - name: Apple TV 4K で単体テストを実行する
         env:
           TEST_RUNNER_MILU_SKIP_AUDIO_ONLY_RENDERER_TEST: '1'
