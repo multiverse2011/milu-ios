@@ -262,9 +262,70 @@ struct GuideCursorTests {
         #expect(GuideCursorMotion.repairedCursor(current, from: 1, anchor: current.anchor, in: []) == nil)
     }
 
+    @Test func emptyTimeKeepsItsColumnAndMovesFromTheTimeUntilAProgramArrives() throws {
+        let before = service(1, [(id: 1, start: 10, end: 20), (id: 2, start: 30, end: 40), (id: 4, start: 60, end: 70)])
+        let empty = try #require(GuideCursorMotion.cursor(at: 0, anchor: 50, in: [before]))
+        let selectedID: Int64? = empty.programID
+        #expect(selectedID == nil)
+        #expect(empty.anchor == 50)
+        #expect(GuideCursorMotion.selectedCursor(inColumn: 0, from: empty, in: [before]) == nil)
+        #expect(GuideCursorMotion.vertical(empty, in: [before], by: -1)?.programID == 2)
+        #expect(GuideCursorMotion.vertical(empty, in: [before], by: 1)?.programID == 4)
+        let other = service(2, [(id: 5, start: 10, end: 20)])
+        #expect(GuideCursorMotion.horizontal(empty, in: [before, other], by: 1)
+            == GuideCursor(column: 1, programID: nil, anchor: 50))
+
+        let filled = service(1, [(id: 1, start: 10, end: 20), (id: 2, start: 30, end: 40),
+                                 (id: 3, start: 45, end: 55), (id: 4, start: 60, end: 70)])
+        let arrived = GuideCursorMotion.cursorAfterRefresh(empty, previous: [before], current: [filled], range: 0..<100)
+        #expect(arrived == GuideCursor(column: 0, programID: 3, anchor: 50))
+    }
+
     @Test func staleCursorIsNotFound() {
         #expect(GuideCursorMotion.program(GuideCursor(column: 0, programID: 99, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.program(GuideCursor(column: 9, programID: 1, anchor: 0), in: services) == nil)
         #expect(GuideCursorMotion.vertical(GuideCursor(column: 0, programID: 99, anchor: 0), in: services, by: 1) == nil)
+    }
+
+    @Test func refreshMovesToAUsableColumnWhenTheStationRemainsButLosesItsPrograms() {
+        let previous = [service(1, [(id: 1, start: 40, end: 60)]), service(2, [(id: 2, start: 10, end: 20)])]
+        let current = [service(1, []), previous[1]]
+        let selected = GuideCursor(column: 0, programID: 1, anchor: 50)
+
+        #expect(GuideCursorMotion.cursor(at: 0, anchor: 50, in: current) == nil)
+        #expect(GuideCursorMotion.cursorAfterRefresh(
+            selected, previous: previous, current: current, range: 0..<100, hasResponse: false
+        ) == GuideCursor(column: 1, programID: nil, anchor: 50))
+    }
+
+    @Test func repairKeepsAnEmptySelectionWhenItsStationRemainsButLosesItsPrograms() throws {
+        let previous = [service(1, [(id: 1, start: 10, end: 20)]), service(2, [(id: 2, start: 40, end: 60)])]
+        let empty = try #require(GuideCursorMotion.cursor(at: 0, anchor: 50, in: previous))
+        let current = [service(1, []), previous[1]]
+
+        #expect(GuideCursorMotion.repairedCursor(empty, from: 0, anchor: 50, in: current)
+            == GuideCursor(column: 1, programID: nil, anchor: 50))
+        #expect(GuideCursorMotion.repairedCursor(empty, from: 0, anchor: 50, in: [current[0]]) == empty)
+    }
+
+    @Test func chipTimeSurvivesUntilAColumnCanBeUsed() {
+        let waiting = [service(1, []), service(2, []), service(3, [])]
+        let anchor: Int64 = 50
+        let placeholder = GuideCursor(column: 0, programID: nil, anchor: anchor)
+        #expect(GuideCursorMotion.cursor(at: 0, anchor: anchor, in: waiting) == placeholder)
+        #expect(GuideCursorMotion.cursor(at: 2, anchor: anchor, in: waiting) == placeholder)
+        #expect(GuideCursorMotion.cursor(at: 0, anchor: anchor, in: []) == nil)
+        #expect(GuideCursorMotion.cursorAfterRefresh(
+            placeholder, previous: waiting, current: waiting, range: 0..<100, hasResponse: false
+        ) == placeholder)
+
+        let loaded = [waiting[0], service(2, [(id: 2, start: 40, end: 60)]),
+                      service(3, [(id: 3, start: 40, end: 60)])]
+        let resumed = GuideCursorMotion.cursorAfterRefresh(
+            placeholder, previous: waiting, current: loaded, range: 0..<100
+        )
+        #expect(resumed == GuideCursor(column: 1, programID: nil, anchor: anchor))
+        #expect(GuideCursorMotion.repairedCursor(resumed, from: 1, anchor: anchor, in: loaded)
+            == GuideCursor(column: 1, programID: 2, anchor: anchor))
     }
 }

@@ -8,16 +8,16 @@ struct TVGuideView: View {
 
     var body: some View {
         Group {
-            if model.didFail, model.guide == nil {
+            if model.tvDidFail, model.tvGuide == nil {
                 unavailable
-            } else if let guide = model.guide {
+            } else if let guide = model.tvGuide {
                 TVGuideBoard(guide: guide, model: model)
             } else {
                 Color.clear
             }
         }
         .task {
-            await model.reload()
+            await model.tvStart()
         }
         .onAppear {
             model.start()
@@ -42,7 +42,7 @@ struct TVGuideView: View {
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
             Button("再試行") {
-                Task { await model.reload() }
+                Task { await model.tvStart() }
             }
             .font(.callout.weight(.semibold))
             .padding(.top, 16)
@@ -107,8 +107,8 @@ private struct TVGuideBoard: View {
     @State private var viewport = CGSize.zero
     @State private var didScroll = false
 
-    private var from: Double { Double(GuideLayout.broadcastRange(for: model.selectedDay).from) }
-    private var to: Double { Double(GuideLayout.broadcastRange(for: model.selectedDay).to) }
+    private var from: Double { Double(model.tvFrom) }
+    private var to: Double { Double(model.tvTo) }
 
     private var totalHeight: Double {
         GuideLayout.height(rangeStart: from, rangeEnd: to, pointsPerMinute: GuideLayout.tvPointsPerMinute)
@@ -144,8 +144,6 @@ private struct TVGuideBoard: View {
             didScroll = true
             reset()
         }
-        .onChange(of: model.selectedDay) { _, _ in reset() }
-        .onChange(of: model.selectedType) { _, _ in reset() }
         // 読み直しで局が減ると表の幅が縮む。古い送り位置のままだと全部が画面の外に出る
         .onChange(of: guide.services.count) { _, _ in
             let target = CGPoint(x: clampX(scroll.x), y: scroll.y)
@@ -158,9 +156,8 @@ private struct TVGuideBoard: View {
                 scrollHigh = target
             }
         }
-        // 読み直しで選んだ番組や局が消えたら、カーソルと送りをそろえ直す
-        .onChange(of: guide.services) { _, services in
-            repairFocus(services, now: Date())
+        .onChange(of: guide) { previous, current in
+            repairGuide(after: previous, current: current)
         }
         // 列への直接移動と、格子の外にある隣の列への移動を焦点の遷移で扱う。
         .onChange(of: focus) { old, new in
@@ -235,7 +232,8 @@ private struct TVGuideBoard: View {
     // MARK: 上の段
 
     private func chips(now: Date) -> some View {
-        ScrollView(.horizontal) {
+        let selectedDay = cursorDay(now: now)
+        return ScrollView(.horizontal) {
             HStack(spacing: 40) {
                 HStack(spacing: 8) {
                     ForEach(model.availableTypes, id: \.self) { type in
@@ -244,7 +242,7 @@ private struct TVGuideBoard: View {
                             active: type == model.selectedType,
                             focus: .type(type)
                         ) {
-                            model.selectType(type)
+                            select(type: type)
                         }
                     }
                 }
@@ -252,10 +250,10 @@ private struct TVGuideBoard: View {
                     ForEach(model.menuDays, id: \.self) { day in
                         chip(
                             GuideLayout.dayChipLabel(for: day, today: now),
-                            active: GuideLayout.calendar.isDate(day, inSameDayAs: model.selectedDay),
+                            active: day == selectedDay,
                             focus: .day(day)
                         ) {
-                            model.selectDay(day)
+                            select(day: day)
                         }
                     }
                 }
@@ -330,11 +328,12 @@ private struct TVGuideBoard: View {
         // 上の的を経由する間は強調を保つ。詳細を閉じる間は格子に焦点が戻るまで表示しない。
         let highlightedColumn = focus == .aboveGrid ? lastColumn : focusColumn
         let focused = opened == nil && !isRestoringDetailFocus && selected?.column == highlightedColumn ? selected : nil
+        let highlighted = focused.flatMap { GuideCursorMotion.program($0, in: guide.services) }
         let gridCells = columnsInRange.map { column in
-            (column: column, cells: cells(in: column, rows: rows, focused: focused))
+            (column: column, cells: cells(in: column, rows: rows, highlighted: highlighted))
         }
         let nowY = nowOffset(now: now)
-        let ruler = timeColumn(now: now, nowY: nowY)
+        let ruler = timeColumn(now: now, nowY: nowY, rows: rows)
         return GuideGridScroll(scroll: scroll) { position in
             let x = timeWidth - position.x
             return ZStack(alignment: .topLeading) {
@@ -425,14 +424,14 @@ private struct TVGuideBoard: View {
         .frame(width: size.width, height: size.height, alignment: .topLeading)
     }
 
-    /// マスと過ぎた所の黒。見えている範囲と前後だけを作る
+    /// マス・過ぎた所の黒・放送日の境目の線。見えている範囲と前後だけを作る
     private func columns(
         _ gridCells: [(column: Int, cells: [Cell])], height: Double,
         nowY: Double?, scrollY: Double
     ) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(gridCells, id: \.column) { column, cells in
-                ForEach(cells, id: \.item.id) { cell in
+                ForEach(cells) { cell in
                     let top = cell.top + GuideLayout.tvColumnGap / 2
                     TVGuideCell(
                         item: cell.item,
@@ -447,6 +446,22 @@ private struct TVGuideBoard: View {
                         .zIndex(cell.focused ? 1 : 0)
                 }
             }
+            // 起点より後の 4:00 に、時刻の列の日付見出しと同じ位置で線を引く。
+            ForEach(model.tvDays, id: \.self) { day in
+                let start = GuideLayout.broadcastRange(for: day).from
+                if start > Int64(from) {
+                    Rectangle()
+                        .fill(.secondary.opacity(0.35))
+                        .frame(width: contentWidth, height: 1)
+                        .offset(y: GuideLayout.offset(
+                            of: Double(start),
+                            from: from,
+                            pointsPerMinute: GuideLayout.tvPointsPerMinute
+                        ) - scrollY)
+                        .allowsHitTesting(false)
+                        .zIndex(1.4)
+                }
+            }
             if let nowY {
                 // 過ぎた所はマスの上に重ねる (画面案の z)。当たりは取らない
                 Rectangle()
@@ -459,26 +474,40 @@ private struct TVGuideBoard: View {
         .frame(width: contentWidth, height: totalHeight, alignment: .topLeading)
     }
 
-    /// 時刻の列。時の数字と、いまの線の左に出す分 (TV-Guide の画面案)。
+    /// 時刻の列。時の数字と、日の境目 (4:00) には日付の見出し、いまの線の左には分 (TV-Guide の画面案)。
     /// 地の色で塗って切り取る (横に送ったマスがここへ潜り込まないように)
-    private func timeColumn(now: Date, nowY: Double?) -> some View {
-        let start = from
-        let hours = (0..<24).map { hour in
-            let time = start + Double(hour) * 3_600_000
-            let date = Date(timeIntervalSince1970: time / 1000)
-            let label = Text("\(GuideLayout.calendar.component(.hour, from: date))")
-            let y = GuideLayout.offset(of: time, from: start, pointsPerMinute: GuideLayout.tvPointsPerMinute) + 6
-            return (hour: hour, label: label, y: y)
-        }
+    private func timeColumn(now: Date, nowY: Double?, rows: ClosedRange<Double>) -> some View {
+        let ppm = GuideLayout.tvPointsPerMinute
+        let hourMillis = 3_600_000.0
+        let endHour = Int(((to - from) / hourMillis).rounded())
+        let headings = Dictionary(uniqueKeysWithValues: model.tvDays.map {
+            (GuideLayout.broadcastRange(for: $0).from, GuideLayout.dayHeading(for: $0))
+        })
+        // 時刻の目盛りもマスと同じ範囲を作り、送りの途中で欠けないようにする。
+        let firstHour = max(0, Int((rows.lowerBound / (ppm * 60)).rounded(.down)))
+        let lastHour = min(endHour - 1, Int((rows.upperBound / (ppm * 60)).rounded(.up)))
         let minute = nowY.map { _ in Text("\(GuideLayout.calendar.component(.minute, from: now))") }
         return ZStack(alignment: .topLeading) {
-            ForEach(hours, id: \.hour) { hour in
-                hour.label
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .offset(y: hour.y)
+            if lastHour >= firstHour {
+                ForEach(firstHour...lastHour, id: \.self) { hour in
+                    let time = Int64(from + Double(hour) * hourMillis)
+                    let y = GuideLayout.offset(of: Double(time), from: from, pointsPerMinute: ppm)
+                    if let heading = headings[time] {
+                        Text(heading)
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .offset(y: y + 6)
+                    } else {
+                        Text("\(GuideLayout.calendar.component(.hour, from: Date(timeIntervalSince1970: Double(time) / 1000)))")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .offset(y: y + 6)
+                    }
+                }
             }
             if let nowY, let minute {
                 minute
@@ -497,14 +526,20 @@ private struct TVGuideBoard: View {
     }
 
     private func nowOffset(now: Date) -> Double? {
-        let today = GuideLayout.calendar.isDate(model.selectedDay, inSameDayAs: GuideLayout.broadcastDay(for: now))
-        guard today else { return nil }
+        let time = now.timeIntervalSince1970 * 1000
         return GuideLayout.nowOffset(
-            now: now.timeIntervalSince1970 * 1000,
+            now: time,
             rangeStart: from,
             rangeEnd: to,
             pointsPerMinute: GuideLayout.tvPointsPerMinute
         )
+    }
+
+    /// カーソルがある時刻の放送日 (日付のチップの選択に使う)
+    private func cursorDay(now: Date) -> Date? {
+        resolvedCursor(now: now).map {
+            GuideLayout.broadcastDay(for: Date(timeIntervalSince1970: Double($0.anchor) / 1000))
+        }
     }
 
     /// いまのカーソル。読み直しで番組が消えていたら、焦点の列 (無ければ最後に焦点のあった列) で
@@ -568,9 +603,24 @@ private struct TVGuideBoard: View {
         return max(0, min(scroll.y, scrollLow.y) - margin)...(max(scroll.y, scrollHigh.y) + Double(size.height) + margin)
     }
 
-    private typealias Cell = (item: GuideProgramItem, title: AttributedString, top: Double, height: Double, focused: Bool)
+    private struct Cell: Identifiable {
+        struct ID: Hashable {
+            let programID: Int64
+            let startAt: Int64
+        }
 
-    private func cells(in column: Int, rows: ClosedRange<Double>, focused: GuideCursor?) -> [Cell] {
+        let item: GuideProgramItem
+        let focused: Bool
+        let segmentStart: Int64
+        let title: AttributedString
+        let top: Double
+        let height: Double
+        var id: ID { ID(programID: item.id, startAt: segmentStart) }
+    }
+
+    private func cells(
+        in column: Int, rows: ClosedRange<Double>, highlighted: (column: Int, program: GuideProgram)?
+    ) -> [Cell] {
         let service = guide.services[column]
         return service.programs.compactMap { program in
             guard let frame = GuideLayout.frame(
@@ -584,33 +634,36 @@ private struct TVGuideBoard: View {
                 frame.top + frame.height >= rows.lowerBound
             else { return nil }
             let item = GuideProgramItem(service: service, program: program)
-            let isFocused = focused?.column == column && focused?.programID == item.id
-            return (item, TVGuideCell.title(for: item, focused: isFocused), frame.top, frame.height, isFocused)
+            let focused = highlighted?.column == column && highlighted?.program.id == program.id
+                && highlighted?.program.startAt == program.startAt
+            return Cell(
+                item: item, focused: focused, segmentStart: program.startAt,
+                title: TVGuideCell.title(for: item, focused: focused), top: frame.top, height: frame.height
+            )
         }
     }
 
     // MARK: フォーカスと送り
 
-    /// 上は列から上の的へ焦点が移ったときだけ処理する。
+    /// 上は列から上の的やチップへ焦点が移ったときだけ処理する。
     private func moveUp(from column: Int) {
-        if let base = resolvedCursor(now: Date()),
-           let current = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
-           let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
+        let current = resolvedCursor(now: Date()).flatMap {
+            $0.column == column ? $0 : GuideCursorMotion.cursor(at: column, anchor: $0.anchor, in: guide.services)
+        }
+        if let current, let up = GuideCursorMotion.vertical(current, in: guide.services, by: -1) {
             lastColumn = column
             animate(to: up, in: guide.services)
             focus = .column(column)
         } else {
             lastColumn = nil
-            if focus == .aboveGrid {
-                focus = model.menuDays.contains(model.selectedDay) ? .day(model.selectedDay) : .type(model.selectedType)
-            }
+            if focus == .aboveGrid { focus = topChip() }
         }
     }
 
     /// 画面外の隣の列を作る送り先と、その列への焦点を同じ更新で設定する。
     private func moveAcrossColumnEdge(_ edge: ColumnEdge, from column: Int) {
         guard let base = resolvedCursor(now: Date()),
-              let current = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
+              let current = base.column == column ? base : GuideCursorMotion.cursor(at: column, anchor: base.anchor, in: guide.services),
               let next = GuideCursorMotion.horizontal(current, in: guide.services, by: edge.step)
         else {
             focus = GuideCursorMotion.isUsable(column, in: guide.services) ? .column(column) : nil
@@ -631,12 +684,51 @@ private struct TVGuideBoard: View {
               let current = resolvedCursor(now: Date()),
               focus == .column(current.column)
         else { return }
-        if let next = GuideCursorMotion.vertical(current, in: guide.services, by: 1) {
+        let next = GuideCursorMotion.vertical(current, in: guide.services, by: 1)
+        if let day = model.tvBlockingDay(after: current.anchor, before: next?.anchor) {
+            // 読み込み中も再試行中も、押下では焦点を動かさない。
+            Task { await model.tvRetry(day: day) }
+        } else if let next {
             animate(to: next, in: guide.services)
         }
     }
 
-    /// 焦点の移動に合わせて表を滑らかに送る。連打では前の動きを打ち切って次へ向かう
+    private func topChip() -> Focus {
+        let days = model.menuDays
+        let day = cursorDay(now: Date()).flatMap { days.contains($0) ? $0 : nil } ?? days.first
+        return day.map(Focus.day) ?? .type(model.selectedType)
+    }
+
+    /// 日付チップは全日格子の座標を選ぶ。取得中や失敗した日にもそのまま送れる。
+    private func select(day: Date) {
+        guard model.tvDays.contains(day) else { return }
+        let now = Date()
+        let time = day == GuideLayout.broadcastDay(for: now)
+            ? Int64(now.timeIntervalSince1970 * 1000) : GuideLayout.broadcastRange(for: day).from
+        jump(to: time)
+    }
+
+    private func select(type: ServiceType) {
+        Task { await model.tvSelectType(type) }
+    }
+
+    /// 指定の時刻を上から 1/4 の所へ。番組がある場合は今の列を保つ。
+    private func jump(to time: Int64) {
+        let services = guide.services
+        let y = GuideLayout.offset(of: Double(time), from: from, pointsPerMinute: GuideLayout.tvPointsPerMinute)
+        let target = CGPoint(x: clampX(scroll.x), y: clampY(y - Double(viewport.height) / 4))
+        withAnimation(nil) {
+            finishScroll(at: target)
+            let previous = cursor.flatMap { GuideCursorMotion.isUsable($0.column, in: services) ? $0.column : nil }
+            if let column = previous ?? services.firstIndex(where: { !$0.programs.isEmpty }) ?? services.indices.first,
+               let next = GuideCursorMotion.cursor(at: column, anchor: time, in: services) {
+                cursor = next
+                follow(next, in: services, animated: false)
+            }
+        }
+    }
+
+    /// 焦点の移動に合わせて、表を滑らかに送る。連打では前の動きを打ち切って次へ向かう
     /// (アニメーションは溜まらない)。動いている間は、連鎖中に出した送り先の範囲を列・行に作る
     private func animate(to cursor: GuideCursor, in services: [GuideService]) {
         // 何も動かない (読み直しの後始末や、同じ所へ入り直しただけ) なら動きを始めない
@@ -654,16 +746,38 @@ private struct TVGuideBoard: View {
             follow(cursor, in: services, animated: true)
         } completion: {
             guard animationToken == token else { return }
-            isAnimating = false
-            scrollLow = scroll
-            scrollHigh = scroll
+            finishScroll(at: scroll)
         }
+    }
+
+    private func finishScroll(at target: CGPoint) {
+        animationToken += 1
+        isAnimating = false
+        scroll = target
+        scrollLow = target
+        scrollHigh = target
+    }
+
+    /// 決定できる位置の判定に使う、選択マスの縦範囲。
+    private func cellFrame(for cursor: GuideCursor) -> ClosedRange<Double>? {
+        guard let (_, program) = GuideCursorMotion.program(cursor, in: guide.services),
+              let frame = GuideLayout.frame(
+                  start: Double(program.startAt),
+                  end: Double(program.endAt),
+                  rangeStart: from,
+                  rangeEnd: to,
+                  pointsPerMinute: GuideLayout.tvPointsPerMinute
+              )
+        else { return nil }
+        let top = frame.top + GuideLayout.tvColumnGap / 2
+        return top...(top + max(frame.height - GuideLayout.tvColumnGap, 2))
     }
 
     /// その列で選ぶ番組 (焦点の列はいま強調しているマス)
     private func selection(column: Int, now: Date) -> (cursor: GuideCursor, item: GuideProgramItem)? {
         guard let base = resolvedCursor(now: now),
               let cursor = GuideCursorMotion.selectedCursor(inColumn: column, from: base, in: guide.services),
+              let frame = cellFrame(for: cursor), frame.upperBound > scroll.y, frame.lowerBound < scroll.y + viewport.height,
               let (c, program) = GuideCursorMotion.program(cursor, in: guide.services)
         else { return nil }
         return (cursor, GuideProgramItem(service: guide.services[c], program: program))
@@ -728,6 +842,32 @@ private struct TVGuideBoard: View {
         return "\(item.serviceName) \(time) \(item.name)"
     }
 
+    /// 取得結果の追加で座標は変わらない。選んでいた番組が外れた場合だけ送り先を直す。
+    private func repairGuide(after previous: GuideResponse, current: GuideResponse) {
+        if previous.type != current.type || previous.from != current.from {
+            reset()
+            if focusColumn != nil, opened == nil, let cursor { focus = .column(cursor.column) }
+            return
+        }
+
+        if let cursor, let target = GuideCursorMotion.cursorAfterRefresh(
+            cursor, previous: previous.services, current: current.services, range: model.tvFrom..<model.tvTo,
+            hasResponse: model.tvHasResponse(at: cursor.anchor)
+        ), target != cursor {
+            withAnimation(nil) {
+                self.cursor = target
+                if lastColumn != nil || focusColumn != nil { lastColumn = target.column }
+                follow(target, in: current.services, animated: false)
+                if focusColumn != nil, opened == nil { focus = .column(target.column) }
+            }
+            return
+        }
+
+        let target = CGPoint(x: scroll.x, y: clampY(scroll.y))
+        if target != scroll { withAnimation(nil) { finishScroll(at: target) } }
+        repairFocus(current.services, now: Date())
+    }
+
     /// フォーカスの当たっている列を枠に入れ、その左右の次の列 (番組のある列) を少し見える所まで
     /// 横に送る。tvOS の焦点はクリップの外の的へは移れないので、次へ移れる分を先に出しておく。
     /// 縦は基準の時刻と、画面内に寄せた見出しが読める所まで送る。
@@ -763,7 +903,7 @@ private struct TVGuideBoard: View {
             scrollY: scroll.y, viewportHeight: Double(viewport.height), anchorY: anchorY,
             cell: cell, headingHeight: headingHeight
         )
-        return CGPoint(x: clampX(x), y: clampY(y))
+        return CGPoint(x: clampX(x, serviceCount: services.count), y: clampY(y))
     }
 
     /// 送る。`animated` が false のときは即座に送り、動きの範囲も畳む (開いたとき・後始末)。
@@ -779,10 +919,7 @@ private struct TVGuideBoard: View {
             // 走っている動きを止められるのは送り先が変わるときだけ。同じ値のまま範囲だけ
             // 畳むと、残りの動きで作られていない列・行が出る (マスが欠ける)
             withAnimation(nil) {
-                isAnimating = false
-                scrollLow = target
-                scrollHigh = target
-                scroll = target
+                finishScroll(at: target)
             }
         }
     }
@@ -803,21 +940,20 @@ private struct TVGuideBoard: View {
         let target = CGPoint(x: x, y: clampY(y))
         // アニメーション中でも確実に止めて即座に置き直す
         withAnimation(nil) {
-            scroll = target
-            isAnimating = false
-            scrollLow = target
-            scrollHigh = target
+            finishScroll(at: target)
             cursor = initialCursor
         }
     }
 
-    private func clampX(_ x: Double) -> Double {
+    private func clampX(_ x: Double, serviceCount: Int? = nil) -> Double {
         let visibleWidth = max(Double(viewport.width) - timeWidth, 1)
-        return min(max(0, x), max(0, contentWidth - visibleWidth))
+        let width = serviceCount.map { Double($0) * columnStep() - GuideLayout.tvColumnGap } ?? contentWidth
+        return min(max(0, x), max(0, width - visibleWidth))
     }
 
     private func clampY(_ y: Double) -> Double {
-        min(max(0, y), max(0, totalHeight - Double(viewport.height)))
+        let range = GuideLayout.tvScrollRange(origin: from, end: to, viewportHeight: viewport.height)
+        return min(max(range.lowerBound, y), range.upperBound)
     }
 }
 

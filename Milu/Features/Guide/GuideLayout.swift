@@ -133,7 +133,7 @@ nonisolated enum GuideLayout {
         return (y, offset(of: bottom, from: rangeStart, pointsPerMinute: ppm) - y)
     }
 
-    /// いまの線の位置 (pt)。いまが表の範囲の外なら `nil` (今日の表だけ出す)
+    /// いまの線の位置 (pt)。いまが表の範囲の外なら `nil` (いまの線は出さない)
     static func nowOffset(
         now: Double,
         rangeStart: Double,
@@ -147,6 +147,14 @@ nonisolated enum GuideLayout {
     /// 開いたときに送る位置 (pt)。いまの線が上から 1/4 に来る所。負にならないようにする。
     static func initialScrollOffset(nowOffset: Double, viewportHeight: Double) -> Double {
         max(0, nowOffset - viewportHeight / 4)
+    }
+
+    /// 固定の起点から、最後の放送日の末尾までに送り先を収める。
+    static func tvScrollRange(
+        origin: Double, end: Double, viewportHeight: Double
+    ) -> ClosedRange<Double> {
+        let bottom = offset(of: end, from: origin, pointsPerMinute: tvPointsPerMinute)
+        return 0...max(0, bottom - viewportHeight)
     }
 
     /// 基準の時刻と、マスの見えている部分に寄せた見出しを収める。
@@ -184,7 +192,7 @@ nonisolated enum GuideLayout {
         return "\(calendar.component(.minute, from: now))"
     }
 
-    /// `date` が属する放送日 (その日の 4:00)。4:00 より前は前の日の番組表
+    /// `date` が属する放送日 (その日の 0:00)。4:00 より前は前の日の番組表
     static func broadcastDay(for date: Date, calendar: Calendar = GuideLayout.calendar) -> Date {
         let day = calendar.date(from: calendar.dateComponents([.year, .month, .day], from: date)) ?? date
         let hour = calendar.component(.hour, from: date)
@@ -199,6 +207,11 @@ nonisolated enum GuideLayout {
         let start = calendar.date(bySettingHour: broadcastDayStartHour, minute: 0, second: 0, of: day)!
         let end = calendar.date(byAdding: .day, value: 1, to: start)!
         return (Int64(start.timeIntervalSince1970 * 1000), Int64(end.timeIntervalSince1970 * 1000))
+    }
+
+    /// 時刻の列に出す日の見出し。時刻の列 (70pt) に収めるため月/日だけの「11/29」
+    static func dayHeading(for day: Date, calendar: Calendar = GuideLayout.calendar) -> String {
+        "\(calendar.component(.month, from: day))/\(calendar.component(.day, from: day))"
     }
 
     /// 日付のメニューに並べる日。今日から 8 日ぶんで、`until` より先の日は並べない (番組表が無ければ `nil`)

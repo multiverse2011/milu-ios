@@ -223,6 +223,57 @@ struct GuideLayoutTests {
         #expect(GuideLayout.tvColumnRange(scrollX: 266 * 3, width: 500, count: 6) == 2..<6)
     }
 
+    @Test func tvHorizontalFollowShowsAServiceThatMovedBeyondTheOldWidth() throws {
+        let program = GuideProgram(
+            id: 10, name: "番組", startAt: 0, endAt: 1000, description: nil,
+            genre: nil, copyNever: false, reservation: nil, recordingId: nil
+        )
+        let services = [8, 5, 3, 2, 4, 9].map { id in
+            GuideService(id: Int64(id), name: "局", mainId: nil, remoteControlKey: nil, logo: nil, programs: [program])
+        }
+        let selectedService: Int64 = 9
+        // 元の 3 局のうち、選択局より右にあった局が左へ移る。
+        let previousServices = [services[4], services[5], services[1]]
+        let column = try #require(services.firstIndex { $0.id == selectedService })
+        #expect(previousServices.firstIndex { $0.id == selectedService } == 1)
+        #expect(column == 5)
+        let viewportWidth = 850.0
+        let visibleWidth = viewportWidth - GuideLayout.tvTimeWidth
+        let x = GuideLayout.tvFollowColumnOffset(
+            scrollX: 0, visibleWidth: visibleWidth, column: column,
+            previous: GuideCursorMotion.adjacentColumn(from: column, in: services, by: -1), next: nil
+        )
+        let columnLeft = Double(column) * (GuideLayout.tvColumnWidth + GuideLayout.tvColumnGap)
+        #expect(x > 0)
+        #expect(x <= columnLeft)
+        #expect(columnLeft + GuideLayout.tvColumnWidth <= x + viewportWidth - GuideLayout.tvTimeWidth)
+    }
+
+    @Test func tvAppendingADayExtendsScrollWithoutMovingTheExistingPositions() {
+        let origin = ms(14, 4)
+        let before = GuideLayout.tvScrollRange(origin: origin, end: ms(16, 4), viewportHeight: 700)
+        let after = GuideLayout.tvScrollRange(origin: origin, end: ms(17, 4), viewportHeight: 700)
+        let dayHeight = 1_440 * GuideLayout.tvPointsPerMinute
+        #expect(after.lowerBound == before.lowerBound)
+        #expect(abs(after.upperBound - before.upperBound - dayHeight) < 0.000_001)
+
+        let scrollLow = dayHeight
+        let scrollHigh = scrollLow + 200
+        let ringTop = GuideLayout.offset(of: ms(15, 4, 30), from: origin, pointsPerMinute: GuideLayout.tvPointsPerMinute)
+        for range in [before, after] {
+            #expect(range.contains(scrollLow))
+            #expect(range.contains(scrollHigh))
+            let interpolatedScrollY = min(max(range.lowerBound, scrollLow + 60), range.upperBound)
+            #expect(ringTop - interpolatedScrollY == 30 * GuideLayout.tvPointsPerMinute - 60)
+        }
+    }
+
+    @Test func dayHeading() {
+        #expect(GuideLayout.dayHeading(for: date(29, 0), calendar: calendar) == "11/29")
+        let december = calendar.date(from: DateComponents(year: 2026, month: 12, day: 1))!
+        #expect(GuideLayout.dayHeading(for: december, calendar: calendar) == "12/1")
+    }
+
     @Test func tvDayChips() {
         // TV-Guide の日付のチップは「今日」「明日」「16 (月)」
         let now = date(14, 15)
